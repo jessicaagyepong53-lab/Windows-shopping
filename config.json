@@ -1,0 +1,20 @@
+{
+  "adminEmail": "Emmanuelagyepong32@admin.com",
+  "payNumber": "0244000000",
+  "payName": "Your Name",
+  "paystackSecret": "sk_test_xxxxxxxx",
+  "siteUrl": "http://localhost:3000",
+  "minOrder": 100,
+  "codMax": 100,
+  "promoPlans": [
+    { "id": "d3", "days": 3, "price": 20 },
+    { "id": "d7", "days": 7, "price": 40 },
+    { "id": "d14", "days": 14, "price": 70 }
+  ],
+  "delivery": {
+    "mode": "product",
+    "perUnit": false,
+    "tiers": [ { "below": 100, "fee": 50 }, { "fee": 100 } ],
+    "regionFees": {}
+  }
+}
