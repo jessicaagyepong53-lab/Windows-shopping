@@ -70,17 +70,51 @@ label{display:block;font-size:13px;font-weight:600;margin:12px 0 4px}
 .err{color:#d6204a;font-size:13px;margin-top:8px}
 .link{background:none;border:0;color:var(--brand);padding:0;text-decoration:underline}
 .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--brand2);color:#fff;padding:10px 18px;border-radius:20px;display:none;z-index:60}
-@media(max-width:800px){
-main{grid-template-columns:1fr}
-.cats{display:flex;overflow-x:auto}
-.cat{width:auto;flex:none;border-bottom:0;border-right:1px solid var(--line)}
-.cat small,.ch{display:none}
-.tag{display:none}.bar{gap:10px}.logo{flex:1;font-size:18px}
-.sell{padding:10px 16px}
-.search select{width:110px}
-.filters input{width:46%}
-.grid{grid-template-columns:repeat(2,1fr);gap:10px}
-.grid.list{grid-template-columns:1fr}
+@media (max-width: 1023px){
+  .bar{flex-wrap:wrap}
+  .tag{display:none}
+  main{grid-template-columns:220px 1fr}
+  .search{max-width:620px}
+  .filters input{width:110px}
+}
+
+@media (max-width: 767px){
+  .bar{gap:8px;padding:8px 12px}
+  .logo{flex:1;font-size:18px}
+  .sell{padding:10px 16px}
+  .hero{padding:24px 12px 36px}
+  .hero h1{font-size:22px}
+  .search{flex-direction:column}
+  .search select,.search input{width:100%}
+  main{grid-template-columns:1fr;padding:0 12px}
+  .cats{display:flex;overflow-x:auto;border-radius:10px}
+  .cat{width:auto;flex:none;border-bottom:0;border-right:1px solid var(--line)}
+  .cat small,.ch{display:none}
+  .chips{gap:8px}
+  .chip{padding:8px 12px}
+  .filters{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+  .filters select,.filters input,.filters .chip,.tog{width:100%}
+  .filters input{min-width:0}
+  .grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+  .grid.list{grid-template-columns:1fr}
+  .doc{padding:0 12px 24px}
+  .cohd{padding:10px 12px}
+  .cobar{padding:8px 12px}
+  .cobar .btn{max-width:none;width:140px}
+}
+
+@media (max-width: 480px){
+  .bar{justify-content:space-between}
+  .lnk{font-size:13px}
+  .sell{width:100%}
+  .search{gap:6px}
+  .hero h1{font-size:20px}
+  .filters{grid-template-columns:1fr}
+  .grid{grid-template-columns:1fr}
+  .cobar{flex-direction:column;align-items:stretch}
+  .cobar .tt{text-align:center}
+  .cobar .btn{width:100%;max-width:none}
+  .wa{right:12px;bottom:12px;padding:10px 14px}
 }
 
 /* ---- interaction ---- */
@@ -189,3 +223,98 @@ main{grid-template-columns:1fr}
 .logo img{width:38px;height:38px;border-radius:10px;display:block}
 .logo span{font-weight:800;letter-spacing:.2px}
 .lw{display:block;width:100%;max-width:230px;margin:0 auto 12px;background:#fff;border-radius:12px;padding:8px 14px}
+
+/* ---- cart selection ---- */
+.cbar{display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--line);padding-bottom:8px;margin-bottom:4px}
+.cbar .chk{margin:0}
+.box input.ck{width:20px;height:20px;flex:none;margin:0}
+
+/* ---- photo gallery ---- */
+.gal{position:relative;background:#111;border-radius:12px;overflow:hidden;aspect-ratio:4/3}
+.gal img{width:100%;height:100%;object-fit:cover;display:block;cursor:zoom-in}
+.gn{position:absolute;top:50%;transform:translateY(-50%);width:36px;height:36px;border-radius:50%;border:0;background:rgba(0,0,0,.5);color:#fff;font-size:22px;line-height:1;cursor:pointer;padding:0}
+.gp{left:8px}.gx{right:8px}
+.gc{position:absolute;bottom:8px;right:8px;background:rgba(0,0,0,.6);color:#fff;font-size:12px;border-radius:10px;padding:2px 8px}
+
+/* ---- support button, footer links, legal pages ---- */
+.wa{position:fixed;right:16px;bottom:16px;z-index:30;background:#25d366;color:#fff;padding:12px 16px;border-radius:30px;font-weight:700;text-decoration:none;box-shadow:0 4px 14px rgba(0,0,0,.25)}
+.wa[hidden]{display:none}
+footer a{color:inherit;text-decoration:underline}
+.doch{background:linear-gradient(135deg,var(--brand),var(--brand2));color:#fff;padding:12px 16px;box-shadow:0 10px 30px rgba(17,24,39,.18)}
+.doch .logo{color:#fff;text-decoration:none;max-width:900px;margin:0 auto}
+.doc{max-width:860px;margin:28px auto;padding:0 16px 32px;line-height:1.7}
+.doc h1{font-size:clamp(2rem,4vw,2.7rem);margin:0 0 12px;letter-spacing:-.03em;color:var(--brand2)}
+.doc h2{font-size:1.2rem;margin:28px 0 12px;padding-bottom:8px;border-bottom:1px solid var(--line);color:var(--brand2)}
+.doc p,.doc li{font-size:1rem;color:var(--text)}
+.doc a{color:var(--brand);font-weight:600}
+.doc a:hover{text-decoration-thickness:2px}
+.doc .upd{color:var(--muted);font-size:.83rem;margin-top:0;padding:8px 12px;border-radius:999px;background:var(--accent);display:inline-block}
+.doc .card,.doc .faq-item,.doc .info-block,.doc .support-panel,.doc .doc-cta{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:18px 20px;margin:18px 0;box-shadow:0 12px 30px rgba(15,23,42,.06)}
+.doc ul{margin:12px 0 0 18px;padding:0}
+.doc li{margin-bottom:10px}
+.doc .support-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin:18px 0}
+.doc .info-block{padding:18px 20px}
+.doc .info-block strong{display:block;color:var(--brand2);margin-bottom:4px;font-size:.95rem}
+.doc .pill{display:inline-flex;align-items:center;gap:8px;padding:8px 12px;border-radius:999px;background:var(--accent);color:var(--brand2);font-size:.8rem;font-weight:700;border:1px solid rgba(55,65,81,.12)}
+.doc .contact-actions,.doc .foot-links{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:16px}
+.doc .doc-btn,.doc .doc-link{display:inline-flex;align-items:center;justify-content:center;border-radius:8px;padding:7px 14px;font-size:.85rem;line-height:1.2;text-decoration:none;font-weight:600;transition:.2s ease;border:0;cursor:pointer;font-family:inherit}
+.doc .doc-btn{background:linear-gradient(135deg,var(--brand),var(--brand2));color:#fff;box-shadow:0 4px 10px rgba(55,65,81,.15)}
+.doc .doc-link{background:var(--accent);color:var(--brand2);border:1px solid rgba(55,65,81,.12)}
+.doc .doc-btn:hover,.doc .doc-link:hover{transform:translateY(-1px)}
+.doc .faq-list{display:grid;gap:12px;margin-top:22px}
+.doc .faq-item{padding:0;border:1px solid rgba(55,65,81,.12);background:var(--card);border-radius:16px;overflow:hidden;box-shadow:0 12px 28px rgba(15,23,42,.05)}
+.doc .faq-button{width:100%;background:transparent;border:0;padding:18px 20px;display:flex;align-items:center;justify-content:space-between;gap:16px;text-align:left;font-size:1.02rem;font-weight:700;color:var(--brand2);cursor:pointer}
+.doc .faq-button:hover{background:rgba(55,65,81,.02)}
+.doc .faq-answer{padding:0 20px 18px;color:var(--text)}
+.doc .faq-answer p{margin:0}
+.doc .faq-icon{display:inline-grid;place-items:center;min-width:28px;height:28px;border-radius:50%;background:var(--accent);color:var(--brand2);font-size:1.3rem;font-weight:700;line-height:1}
+.doc .faq-item.open .faq-button{background:rgba(55,65,81,.02)}
+.doc .doc-hero{background:linear-gradient(135deg,var(--brand),var(--brand2));color:#fff;border-radius:22px;padding:28px 24px;margin-bottom:18px;box-shadow:0 18px 38px rgba(17,24,39,.18)}
+.doc .doc-hero h1{color:#fff;margin:0 0 8px}
+.doc .doc-hero p{margin:0;color:rgba(255,255,255,.9)}
+.doc .muted{color:var(--muted)}
+.doc blockquote{margin:18px 0;padding:16px 18px;border-left:4px solid var(--brand);background:var(--accent);border-radius:0 12px 12px 0;color:var(--text)}
+.doc strong{color:var(--brand2)}
+@media (max-width: 767px){
+  .doc{padding:0 12px 28px}
+  .doc .support-grid{grid-template-columns:1fr}
+  .doc .card,.doc .faq-item,.doc .support-panel,.doc .info-block,.doc .doc-cta{padding:16px}
+  .doc-hero{padding:22px 18px}
+}
+
+/* ---- validation: red fields and messages ---- */
+.box input.field-invalid,.box select.field-invalid,.box textarea.field-invalid,
+.co input.field-invalid,.co select.field-invalid,.co textarea.field-invalid,
+.doc input.field-invalid,.doc textarea.field-invalid{border-color:#d6204a;background:color-mix(in srgb,#d6204a 7%,var(--card));box-shadow:0 0 0 3px rgba(214,32,74,.16);outline:0;animation:shake .3s}
+.box .chk.field-invalid{color:#d6204a;outline:1px solid #d6204a;border-radius:8px;padding:6px 8px;animation:shake .3s}
+.stars.field-invalid{outline:2px solid #d6204a;border-radius:10px;animation:shake .3s}
+.err.cerr,.cerr{background:color-mix(in srgb,#d6204a 9%,var(--card));border:1px solid #d6204a;border-radius:8px;padding:8px 10px;font-weight:600}
+.err.cerr:empty,.cerr:empty{display:none}
+.fe{min-height:0}
+@keyframes shake{25%{transform:translateX(-4px)}75%{transform:translateX(4px)}}
+
+/* ---- cart popup banner ---- */
+.added{background:var(--accent);border:1px solid var(--line);border-radius:10px;padding:10px 12px;font-size:14px;margin-bottom:10px}
+
+/* ---- guides (How to buy / sell / Safety) ---- */
+.guide{list-style:none;counter-reset:g;margin:12px 0;padding:0}
+.guide li{counter-increment:g;position:relative;padding:0 0 14px 40px;font-size:14px;line-height:1.5}
+.guide li::before{content:counter(g);position:absolute;left:0;top:0;width:28px;height:28px;border-radius:50%;background:var(--brand);color:#fff;display:grid;place-items:center;font-weight:700;font-size:13px}
+.guide li b{display:block;font-size:15px;margin-bottom:2px}
+.guide li u{text-decoration:none;font-weight:700}
+.tip{background:var(--accent);border-radius:10px;padding:10px 12px;font-size:13px;margin:6px 0}
+.gsec h4{margin:16px 0 6px;font-size:14px}
+.gsec ul{margin:0;padding-left:18px;font-size:14px}
+.gsec li{margin-bottom:6px;line-height:1.45}
+.glinks{display:flex;gap:16px;flex-wrap:wrap;font-size:13px;margin-top:14px}
+
+/* ---- contact form ---- */
+.doc .support-form-card h2{margin-top:0}
+.doc .field-row{margin-bottom:14px}
+.doc .field-row label{display:block;font-size:.85rem;font-weight:600;margin:0 0 4px}
+.doc .field-row input,.doc .field-row textarea{width:100%;border:1px solid var(--line);background:var(--bg);color:var(--text);border-radius:8px;padding:10px;font:inherit}
+.doc .field-row input:focus,.doc .field-row textarea:focus{outline:2px solid color-mix(in srgb,var(--brand) 40%,transparent);outline-offset:1px}
+.doc .field-row .fe{color:#d6204a;font-size:.8rem;margin-top:4px}
+.doc .form-error:empty{display:none}
+.doc .form-error{margin:0 0 12px}
+.doc .form-ok{background:var(--accent);border-radius:10px;padding:12px 14px;margin-top:12px;font-size:.92rem}

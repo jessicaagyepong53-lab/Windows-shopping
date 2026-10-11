@@ -3,6 +3,7 @@ const $=i=>document.getElementById(i);
 const E=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const money=n=>"GH₵ "+Number(n).toLocaleString();
 const opts=a=>a.map(x=>`<option>${E(x)}</option>`).join("");
+const isValidEmail=s=>/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(s||"").trim());
 const L=(k,d)=>{try{const v=JSON.parse(localStorage.getItem(k));return v??d}catch{return d}};
 const S=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v));return true}catch{toast("Storage is full. Use fewer or smaller images.");return false}};
 
@@ -10,7 +11,7 @@ const CATS=[["Vehicles","🚗",138412],["Property","🏠",28806],["Phones & Tabl
 const LOCS=["All Ghana","Greater Accra","Ashanti","Western","Central","Eastern","Volta","Northern"];
 
 let ads=[], cart=L("ws_cart",{}), wish=L("ws_wish",[]), user=null;
-let FLD=[],deals={},curThread=0,chatTimer=null,editAttrs={};
+let FLD=[],afterAuth=null,deals={},curThread=0,chatTimer=null,editAttrs={};
 const dp=a=>deals[a.id]??a.p;
 let RULES={min:100,cod:100,online:false},st={cat:-1,list:false,n:8,wl:false,af:{},afc:-2}, tmp=[];
 const FEE=25;
@@ -20,10 +21,29 @@ async function api(u,m="GET",b){
     const j=await r.json().catch(()=>({}));return r.ok?j:{error:j.error||"Request failed ("+r.status+")"}}
   catch{return{error:"Cannot reach the server. Check your connection."}}
 }
-function shrink(f){return new Promise(r=>{const i=new Image();i.onload=()=>{const k=Math.min(1,700/Math.max(i.width,i.height)),c=document.createElement("canvas");c.width=i.width*k;c.height=i.height*k;c.getContext("2d").drawImage(i,0,0,c.width,c.height);r(c.toDataURL("image/jpeg",.7))};i.onerror=()=>r(null);i.src=URL.createObjectURL(f)})}
+function shrink(f){return new Promise(r=>{const i=new Image();i.onload=()=>{const k=Math.min(1,1280/Math.max(i.width,i.height)),c=document.createElement("canvas");c.width=i.width*k;c.height=i.height*k;c.getContext("2d").drawImage(i,0,0,c.width,c.height);r(c.toDataURL("image/jpeg",.82))};i.onerror=()=>r(null);i.src=URL.createObjectURL(f)})}
 function toast(m){const t=$("toast");t.textContent=m;t.style.display="block";clearTimeout(toast.h);toast.h=setTimeout(()=>t.style.display="none",2400)}
+/* ---- inline validation: red outline + message, cleared as soon as the user edits ---- */
+const clearFlags=()=>document.querySelectorAll(".field-invalid").forEach(e=>{e.classList.remove("field-invalid");e.removeAttribute("aria-invalid")});
+function mark(id){
+  const el=typeof id==="string"?$(id):id;if(!el)return null;
+  const t=el.type==="checkbox"?el.closest("label"):el;
+  t.classList.add("field-invalid");el.setAttribute("aria-invalid","true");
+  const clear=()=>{t.classList.remove("field-invalid");el.removeAttribute("aria-invalid");const n=t.nextElementSibling;if(n&&n.classList.contains("fe"))n.textContent=""};
+  el.addEventListener("input",clear,{once:true});el.addEventListener("change",clear,{once:true});
+  return t;
+}
+function invalid(ids,msg,err="er"){
+  clearFlags();
+  const list=[].concat(ids).map(mark).filter(Boolean);
+  const e=$(err);if(e){e.textContent=msg;e.classList.add("cerr")}
+  if(!list.length&&e)e.scrollIntoView({block:"nearest",behavior:"smooth"});
+  if(list[0]){list[0].scrollIntoView({block:"center",behavior:"smooth"});const f=list[0].matches("input,select,textarea,button")?list[0]:list[0].querySelector("input");if(f)f.focus({preventScroll:true})}
+  return false;
+}
+const PHONE_RE=/^[0-9+\s]{9,15}$/;
 const M=h=>{$("mb").innerHTML=h;$("m").classList.add("open");const f=$("mb").querySelector("input:not([type=file]),select,textarea");if(f)setTimeout(()=>f.focus(),60)};
-const X=()=>{$("m").classList.remove("open");clearInterval(chatTimer)};
+const X=()=>{$("m").classList.remove("open");clearInterval(chatTimer);afterAuth=null};
 $("m").addEventListener("click",e=>{if(e.target.id=="m")X()});
 document.addEventListener("keydown",e=>{if(e.key=="Escape")X()});
 
@@ -32,7 +52,7 @@ const cartCount=()=>Object.values(cart).reduce((a,b)=>a+b,0);
 
 function badges(){
   $("cc").textContent=cartCount();$("wc").textContent=wish.length;
-  $("acct").textContent=user?"👤 "+user.name.split(" ")[0]:"Sign in";
+  $("acct").textContent=user?"👤 "+user.name.split(" ")[0]+(user.admin?" 🛡️":""):"Sign in";
 }
 function filtered(){
   const q=$("q").value.toLowerCase().trim(),l=$("loc").value,k=$("fk").value,so=$("so").value;
@@ -57,14 +77,26 @@ function draw(){
 }
 const pick=i=>{st.cat=st.cat==i?-1:i;st.n=8;draw()};
 function fav(id){wish=wish.includes(id)?wish.filter(x=>x!=id):[...wish,id];S("ws_wish",wish);draw()}
-function add(id,d=1){cart[id]=(cart[id]||0)+d;if(cart[id]<=0)delete cart[id];S("ws_cart",cart);badges();const c=$("cc");c.classList.remove("bump");void c.offsetWidth;c.classList.add("bump");toast(d>0?"Added to cart ✓":"Cart updated")}
+function add(id,d=1,quiet=false){
+  const a=ads.find(x=>x.id==id);
+  cart[id]=(cart[id]||0)+d;
+  if(cart[id]<=0)delete cart[id];
+  S("ws_cart",cart);
+  badges();
+  const c=$("cc");
+  c.classList.remove("bump");
+  void c.offsetWidth;
+  c.classList.add("bump");
+  if(d>0&&!quiet&&a){showCart(a.t);return}
+  if(!quiet)toast("Cart updated");
+}
 
 function view(id){
   const a=ads.find(x=>x.id==id);if(!a)return;
   const im=a.imgs||[];
   const wa=a.ph?`https://wa.me/${a.ph.replace(/\D/g,"").replace(/^0/,"233")}?text=${encodeURIComponent("Hi, is '"+a.t+"' still available?")}`:"";
-  M(`<div class="dv" id="dv" ${bg(a)}>${im[0]?"":a.e}</div>
-  ${im.length>1?`<div class="thumbs">${im.map(s=>`<img alt="" src="${s}" onclick="$('dv').style.backgroundImage='url('+this.src+')'">`).join("")}</div>`:""}
+  M(`${galHtml(a)}
+  
   <div class="price" style="font-size:22px;margin-top:10px">${money(a.p)}${a.n?' <span class="m">· Negotiable</span>':""}</div>
   <h3>${E(a.t)}</h3><div class="m">${E(CATS[a.c][0])} · ${E(a.l)} · ${E(a.k)}</div>${a.o&&a.sn?`<button class="slr" onclick="seller(${a.o})"><span class="av">${E(a.sn[0])}</span><span style="flex:1"><b>${E(a.sn)}</b> ${a.sv?'<span class="vb">✔ Verified</span>':""}<br><span class="m">${stars(a.sa,a.sc)}</span></span><span class="ch">›</span></button>`:""}
   ${specs(a)}<button class="link" onclick="reviews(${a.id})">${a.rn?stars(a.ra,a.rn):"No reviews yet"} · Reviews</button><p>${E(a.d||"No description provided.")}</p>
@@ -74,32 +106,45 @@ function view(id){
 function del(id){ask("Delete this ad?","This cannot be undone.","Delete",async()=>{const r=await api("/api/ads/"+id,"DELETE");if(r.error)return toast(r.error);ads=ads.filter(a=>a.id!=id);delete cart[id];S("ws_cart",cart);draw();toast("Ad deleted")})}
 
 const cartSub=()=>Object.entries(cart).reduce((s,[id,q])=>{const a=ads.find(x=>x.id==id);return a?s+dp(a)*q:s},0);
-function showCart(){
-  const rows=Object.entries(cart).map(([id,q])=>({a:ads.find(x=>x.id==id),q})).filter(r=>r.a);
-  if(!rows.length)return M('<h3>Your cart</h3><p class="m">Your cart is empty.</p><button class="btn" onclick="X()">Keep shopping</button>');
-  const sub=rows.reduce((s,r)=>s+dp(r.a)*r.q,0);
-  M(`<h3>Your cart</h3>${rows.map(r=>`<div class="line"><div class="ic" ${bg(r.a)}>${r.a.imgs&&r.a.imgs[0]?"":r.a.e}</div><div class="g">${E(r.a.t)}<br><b>${money(dp(r.a))}</b></div><div class="q"><button onclick="add(${r.a.id},-1);showCart()">−</button> ${r.q} <button onclick="add(${r.a.id});showCart()">+</button></div></div>`).join("")}
-  <div class="tot"><span>Subtotal</span><span>${money(sub)}</span></div><div class="tot"><span>Delivery</span><span class="m">Calculated at checkout</span></div>
-  ${sub<RULES.min?`<p class="err">Minimum order is ${money(RULES.min)} (items only). Add ${money(RULES.min-sub)} more to check out.</p>`:""}
-  <div class="row"><button class="btn alt" onclick="X()">Continue</button><button class="btn" onclick="openCheckout()"${sub<RULES.min?" disabled":""}>Checkout</button></div>`);
+function showCart(added){
+  const rows=cartRows();
+  if(!rows.length)return M('<h3>Your cart</h3><p class="m">Your cart is empty.</p><button class="btn" onclick="X()">Continue shopping</button>');
+  const sel=rows.filter(r=>!unsel.has(r.a.id)),sub=sel.reduce((s,r)=>s+dp(r.a)*r.q,0),low=sub<RULES.min;
+  M(`<h3>Your cart</h3>${typeof added==="string"?`<div class="added">✓ <b>${E(added)}</b> was added to your cart. Would you like to continue shopping or check out?</div>`:""}
+  <div class="cbar"><label class="chk"><input type="checkbox" id="sa"${sel.length==rows.length?" checked":""} onchange="cartAll(this.checked)"> Select all (${rows.length})</label><button class="link" onclick="clearCart()">🗑 Clear cart</button></div>
+  ${rows.map(r=>`<div class="line"><input type="checkbox" class="ck"${unsel.has(r.a.id)?"":" checked"} onchange="cartPick(${r.a.id},this.checked)" aria-label="Select ${E(r.a.t)}"><div class="ic" ${bg(r.a)}>${r.a.imgs&&r.a.imgs[0]?"":r.a.e}</div><div class="g">${E(r.a.t)}<br><b>${money(dp(r.a))}</b></div><div class="q"><button onclick="add(${r.a.id},-1,true);showCart()">−</button> ${r.q} <button onclick="add(${r.a.id},1,true);showCart()">+</button></div></div>`).join("")}
+  <div class="tot"><span>Subtotal (${sel.length} selected)</span><span>${money(sub)}</span></div><div class="tot"><span>Delivery</span><span class="m">Calculated at checkout</span></div>
+  ${!sel.length?'<p class="err">Tick at least one item to check out.</p>':low?`<p class="err">Minimum order is ${money(RULES.min)} (items only). Add ${money(RULES.min-sub)} more to check out.</p>`:""}
+  <div class="row"><button class="btn alt" onclick="X()">Continue shopping</button><button class="btn" onclick="openCheckout()"${!sel.length||low?" disabled":""}>Checkout</button></div>`);
 }
+const cartAll=on=>{unsel.clear();if(!on)cartRows().forEach(r=>unsel.add(r.a.id));showCart()};
+const cartPick=(id,on)=>{on?unsel.delete(id):unsel.add(id);showCart()};
+const clearCart=()=>ask("Clear your cart?","This removes everything you added.","Clear cart",()=>{cart={};unsel.clear();S("ws_cart",cart);badges();toast("Cart cleared");showCart()});
 function auth(mode,msg=""){
   const reg=mode=="register";
   M(`<img class="lw" src="logo-wide.png" alt="DealMart"><h3>${reg?"Create account":"Sign in"}</h3>${msg?`<p class="m">${E(msg)}</p>`:""}${reg?'<label>Full name</label><input id="aN"><label>Phone</label><input id="aP" type="tel">':""}
-  <label>Email</label><input id="aE" type="email"><label>Password</label><input id="aW" type="password">
+  <label>Email</label><input id="aE" type="email"><label>Password</label><input id="aW" type="password">${reg?'<p class="m" style="font-size:12px;margin:4px 0">At least 8 characters.</p><label class="chk"><input type="checkbox" id="aT"> I agree to the <a href="/terms" target="_blank">Terms</a> and <a href="/privacy" target="_blank">Privacy Policy</a></label>':'<button class="link" onclick="forgot()">Forgot password?</button>'}
   <div class="err" id="er"></div><div class="row"><button class="btn" onclick="${reg?"doReg()":"doLogin()"}">${reg?"Register":"Sign in"}</button></div>
   <p class="m">${reg?"Have an account?":"New here?"} <button class="link" onclick="auth('${reg?"login":"register"}')">${reg?"Sign in":"Register"}</button></p>
   `);
 }
 async function doReg(){
   const n=$("aN").value.trim(),p=$("aP").value.trim(),e=$("aE").value.trim(),w=$("aW").value;
-  if(!n||!e.includes("@")||w.length<6)return $("er").textContent="Enter a name, a valid email and a password of 6 or more characters.";
-  const r=await api("/api/register","POST",{name:n,phone:p,email:e,password:w});
-  if(r.error)return $("er").textContent=r.error;login(r.user);
+  if(n.length<2)return invalid("aN","Enter your full name.");
+  if(!isValidEmail(e))return invalid("aE","Enter a valid email address.");
+  if(w.length<8)return invalid("aW","Your password must be at least 8 characters.");
+  if(!$("aT").checked)return invalid("aT","Please tick the box to accept the Terms and Privacy Policy.");
+  const r=await api("/api/register","POST",{name:n,phone:p,email:e,password:w,agree:true});
+  if(r.error)return invalid(/email/i.test(r.error)?"aE":/phone/i.test(r.error)?"aP":/password/i.test(r.error)?"aW":[],r.error);
+  login(r.user);
 }
 async function doLogin(){
-  const r=await api("/api/login","POST",{email:$("aE").value.trim(),password:$("aW").value});
-  if(r.error)return $("er").textContent=r.error;login(r.user);
+  const e=$("aE").value.trim(),w=$("aW").value;
+  if(!isValidEmail(e))return invalid("aE","Enter the email you signed up with.");
+  if(!w)return invalid("aW","Enter your password.");
+  const r=await api("/api/login","POST",{email:e,password:w});
+  if(r.error)return invalid(["aE","aW"],r.error);
+  login(r.user);
 }
 const stars=(a,n)=>n?`★ ${a} (${n} review${n==1?"":"s"})`:"No reviews yet";
 let curSeller=null,rt=0;
@@ -138,9 +183,9 @@ async function rpics(files){
   if(!fs.length)return toast(room>0?"Please choose image files":"You can add up to 3 photos");
   for(const f of fs){const s=await shrink(f);if(s)rtmp.push(s)}showRth();
 }
-const setStar=i=>{rt=i;[...$("stv").children].forEach((b,k)=>b.textContent=k<i?"★":"☆")};
+const setStar=i=>{rt=i;$("stv").classList.remove("field-invalid");[...$("stv").children].forEach((b,k)=>b.textContent=k<i?"★":"☆")};
 async function sendRate(id){
-  if(!rt)return $("er").textContent="Tap a star to rate.";
+  if(!rt)return invalid("stv","Tap a star to rate.");
   const b=$("rbtn");b.disabled=true;b.textContent="Sending…";
   const r=await api("/api/ads/"+id+"/reviews","POST",{stars:rt,text:$("rT").value,photos:rtmp});
   if(r.error){b.disabled=false;b.textContent="Submit";return $("er").textContent=r.error}
@@ -151,27 +196,29 @@ function verifyPhone(){
   M(`<h3>Verify your phone</h3><p class="m">We will text a 6-digit code to this number. A verified badge helps buyers trust your ads.</p><label>Phone number</label><input id="vP" type="tel" value="${E(user.phone)}"><div class="err" id="er"></div><div class="row"><button class="btn alt" onclick="account()">Back</button><button class="btn" onclick="sendCode()">Send code</button></div>`);
 }
 async function sendCode(){
-  const p=$("vP").value.trim(),r=await api("/api/verify/send","POST",{phone:p});if(r.error)return $("er").textContent=r.error;
+  const p=$("vP").value.trim();if(!PHONE_RE.test(p))return invalid("vP","Enter a valid phone number.");
+  const r=await api("/api/verify/send","POST",{phone:p});if(r.error)return invalid("vP",r.error);
   M(`<h3>Enter the code</h3><p class="m">Sent to ${E(p)}.${r.dev?" Test mode: the code appears in the server window (PowerShell).":""}</p><label>6-digit code</label><input id="vC" inputmode="numeric" maxlength="6"><div class="err" id="er"></div><div class="row"><button class="btn alt" onclick="verifyPhone()">Back</button><button class="btn" onclick="checkCode()">Verify</button></div>`);
 }
 async function checkCode(){
-  const r=await api("/api/verify/check","POST",{code:$("vC").value.trim()});if(r.error)return $("er").textContent=r.error;
+  if(!/^\d{6}$/.test($("vC").value.trim()))return invalid("vC","Enter the 6-digit code.");
+  const r=await api("/api/verify/check","POST",{code:$("vC").value.trim()});if(r.error)return invalid("vC",r.error);
   user=r.user;ads=(await api("/api/ads")).ads||ads;draw();
   M('<div class="ok">✓</div><h3 style="text-align:center">Phone verified</h3><p class="m" style="text-align:center">Buyers now see a ✔ Verified badge on your ads.</p><button class="btn" onclick="X()">Done</button>');
 }
-function login(u){user=u;X();badges();draw();loadDeals();pollInbox();toast("Welcome, "+u.name.split(" ")[0])}
+function login(u){const f=afterAuth;user=u;X();badges();draw();loadDeals();pollInbox();toast("Welcome, "+u.name.split(" ")[0]);if(f)f()}
 function logout(){api("/api/logout","POST");user=null;deals={};setCount(0);X();badges();draw();toast("Signed out")}
 async function account(){
   if(!user)return auth("login");
-  const mine=myOrders=(await api("/api/orders")).orders||[];myPromos=(await api("/api/promos/mine")).promos||{};
-  M(`<h3>${E(user.name)}</h3><div class="m">${E(user.email)}</div><div style="margin-top:8px">${user.verified?'<span class="vb">✔ Verified phone</span>':'<button class="sm" onclick="verifyPhone()">Verify my phone</button>'} <button class="link" style="margin-left:8px" onclick="seller(${user.id})">View my public profile</button></div><h3 style="margin-top:16px">My orders</h3>
+  const mine=myOrders=(await api("/api/orders")).orders||[];myPromos=(await api("/api/promos/mine")).promos||{};myEarn=await api("/api/payout");
+  M(`<h3>${E(user.name)}</h3><div class="m">${E(user.email)}</div><div style="margin-top:8px">${user.verified?'<span class="vb">✔ Verified phone</span>':'<button class="sm" onclick="verifyPhone()">Verify my phone</button>'} <button class="link" style="margin-left:8px" onclick="seller(${user.id})">View my public profile</button> <button class="link" style="margin-left:8px" onclick="changePw()">Change password</button></div>${user.admin?'<div class="row" style="margin-top:12px"><button class="btn" onclick="adminQ()">🛡️ Admin queue</button><button class="btn alt" onclick="adminOrders()">🚚 Deliveries</button><button class="btn alt" onclick="adminPay()">💰 Payouts</button></div>':""}<h3 style="margin-top:16px">My orders</h3>
   ${mine.length?mine.map(o=>`<div class="line" style="cursor:pointer" onclick="orderView('${E(o.no)}')"><div class="g"><b>${E(o.no)}</b> · ${new Date(o.created).toLocaleDateString()} <span class="vb">${E(D_LBL[o.dstatus]||"Order placed")}</span><br><span class="m">${o.items.map(i=>E(i.t)+" x"+i.q).join(", ")}${o.dday?"<br>🚚 "+fmtDay(o.dday)+", "+E(o.slot):""}</span></div><b>${money(o.total)}</b></div>`).join(""):'<p class="m">No orders yet.</p>'}
-  <h3 style="margin-top:16px">My ads</h3>${myAds()}${user.admin?'<button class="btn" style="margin-top:12px" onclick="adminQ()">🛡️ Admin queue</button><button class="btn alt" style="margin-top:8px" onclick="adminOrders()">🚚 Deliveries</button>':""}<div class="row"><button class="btn alt" onclick="logout()">Sign out</button></div>`);
+  <h3 style="margin-top:16px">My ads</h3>${myAds()}${earnSection()}<div class="row"><button class="btn alt" onclick="logout()">Sign out</button></div>`);
 }
 
 let editId=null;
 function sell(id){
-  if(!user)return auth("login","Sign in to post an ad.");
+  if(!user)return sellGate();
   const a=id?ads.find(x=>x.id==id):null;editId=a?a.id:null;tmp=a?[...(a.imgs||[])]:[];
   const v=k=>a&&a[k]!=null?a[k]:"";
   M(`<h3>${a?"Edit your ad":"Sell something"}</h3><p class="m">Add clear photos and a fair price. It takes about a minute.</p>
@@ -204,11 +251,11 @@ async function pics(files){
 }
 async function post(){
   const t=$("fT").value.trim(),p=$("fP").value,h=$("fH").value.trim();let bad=0;
-  const err=(i,m)=>{$(i).textContent=m;bad=1};["eT","eP","eH"].forEach(i=>$(i).textContent="");
-  if(t.length<3)err("eT","Enter a title of at least 3 characters.");
-  if(p===""||+p<0)err("eP","Enter a price (use 0 if it is free).");
-  if(!/^[0-9+\s]{9,15}$/.test(h))err("eH","Enter a valid phone number.");
-  if(bad)return toast("Please fix the highlighted fields");
+  const err=(i,f,m)=>{$(i).textContent=m;mark(f);bad=bad||f};["eT","eP","eH"].forEach(i=>$(i).textContent="");clearFlags();
+  if(t.length<3)err("eT","fT","Enter a title of at least 3 characters.");
+  if(p===""||+p<0)err("eP","fP","Enter a price (use 0 if it is free).");
+  if(!PHONE_RE.test(h))err("eH","fH","Enter a valid phone number.");
+  if(bad){$(bad).scrollIntoView({block:"center",behavior:"smooth"});$(bad).focus({preventScroll:true});return toast("Please fix the highlighted fields")}
   const eid=editId,btn=$("pbtn"),label=btn.textContent;btn.disabled=true;btn.textContent="Saving…";
   const r=await api(eid?"/api/ads/"+eid:"/api/ads",eid?"PUT":"POST",{t,c:+$("fC").value,l:$("fL").value,p:+p,k:$("fK").value,d:$("fD").value.trim(),ph:h,imgs:tmp,n:$("fN").checked,at:getAt()});
   if(r.error){btn.disabled=false;btn.textContent=label;return toast(r.error)}
@@ -226,13 +273,59 @@ async function sold(id){
   draw();toast(r.ad.x?"Marked as sold":"Your ad is live again");account();
 }
 function ask(t,m,ok,fn){window._ask=fn;M(`<h3>${E(t)}</h3><p>${E(m)}</p><div class="row"><button class="btn alt" onclick="X()">Cancel</button><button class="btn" style="background:#d6204a" onclick="X();_ask()">${E(ok)}</button></div>`)}
+function confirmAction(t,m,primaryLabel,primaryAction,secondaryLabel="Cancel",secondaryAction=()=>X()){window._ask=primaryAction;window._askSecondary=secondaryAction;M(`<h3>${E(t)}</h3><p>${E(m)}</p><div class="row"><button class="btn alt" onclick="X();_askSecondary()">${E(secondaryLabel)}</button><button class="btn" onclick="X();_ask()">${E(primaryLabel)}</button></div>`)}
 
-const info={
-  hb:["How to buy","<p>1. Search or pick a category.<br>2. Open an ad, then chat with the seller on WhatsApp or add it to your cart.<br>3. Check out with Mobile Money or cash on delivery.</p>"],
-  hs:["How to sell","<p>1. Create a free account.<br>2. Tap SELL, add clear photos, a price and your phone number.<br>3. Buyers contact you directly. Edit your ad, mark it as sold or delete it any time from your account.</p>"],
-  ht:["Safety tips","<p>Meet in a public place. Inspect the item before paying. Never send money to someone you have not met. Keep chats on the platform or WhatsApp.</p>"]
-};
-for(const k in info)$(k).onclick=()=>M(`<h3>${info[k][0]}</h3>${info[k][1]}<button class="btn" onclick="X()">Got it</button>`);
+const gLinks='<div class="glinks"><a class="link" href="/faq" target="_blank" rel="noopener">Read the FAQs</a><a class="link" href="/contact" target="_blank" rel="noopener">Contact support</a></div>';
+const guide=k=>({
+hb:["🧺 How to buy",`<p class="m">From finding an item to holding it in your hands, this is how buying works on DealMart.</p>
+<ol class="guide">
+<li><b>Find what you need</b>Search by keyword, choose a location, or tap a category. Use the sort, condition and price filters, and <i>More filters</i> (such as year or mileage for vehicles), to narrow things down.</li>
+<li><b>Check the ad properly</b>Swipe through every photo, read the description and details, and open the seller's profile. Look for the ✔ Verified badge, their rating, and reviews from verified buyers.</li>
+<li><b>Ask before you buy</b>Tap <i>Message seller</i> or <i>Chat on WhatsApp</i> to confirm the item is still available. If the price is negotiable, tap <i>Make an offer</i>. When the seller accepts, that price applies when you order.</li>
+<li><b>Add to cart</b>Tap <i>Add to cart</i>. Your cart opens so you can change quantities or untick items you are not ready for. Then choose <i>Continue shopping</i> or <i>Checkout</i>. The minimum order is ${money(RULES.min)} (items only).</li>
+<li><b>Check out in 3 steps</b><u>Delivery:</u> pick or add an address (street or area is required) and choose a delivery day and time window. <u>Payment:</u> pay by Card or Mobile Money when available, or pay cash on delivery for orders up to ${money(RULES.cod)}. <u>Review:</u> check everything, then tap <i>Place order</i>.</li>
+<li><b>Track your order</b>Open your account, then <i>My orders</i>. You will see Order placed, Confirmed, Out for delivery, then Delivered. You can change the address, day or time until the order is out for delivery.</li>
+<li><b>Inspect, then review</b>Check the item when it arrives. If something is wrong, contact us within 48 hours of the delivery date with your order number. Happy with it? Leave a review to help other buyers.</li>
+</ol>
+<div class="tip">💡 The delivery fee is always shown at checkout before you pay.</div>`],
+hs:["💰 How to sell",`<p class="m">Listing is free. A good ad sells faster, so take a few extra minutes to get it right.</p>
+<ol class="guide">
+<li><b>Create an account and verify your phone</b>Register for free, then tap <i>Verify my phone</i> in your account. The ✔ Verified badge makes buyers trust you more.</li>
+<li><b>Tap SELL and add photos</b>Add up to 5 clear photos in good light. The first one is your cover photo. Show the front, back and any flaws, because honest photos mean fewer disputes.</li>
+<li><b>Write a clear title and description</b>Put the brand, model and size in the title. In the description (up to 500 characters) say what condition it is in, how old it is, what is included and why you are selling. Fill in the extra details for your category, such as year or mileage, so buyers can find you with filters.</li>
+<li><b>Set a fair price</b>Look at similar ads first. Choose the right condition (Brand new, Used or Refurbished) and tick <i>Price is negotiable</i> if you are open to offers.</li>
+<li><b>Publish and manage your ad</b>Your ad goes live straight away. From <i>My ads</i> you can edit it, mark it as sold (or relist it), or delete it. Mark items as sold quickly so buyers do not waste time.</li>
+<li><b>Reply fast</b>Check your messages 💬 often. Answer questions, and accept or decline offers. Quick replies lead to quick sales.</li>
+<li><b>Get paid</b>When an item sells through checkout, your earnings are the item price minus DealMart's commission. They become payable after the order is delivered. Add your Mobile Money details under <i>My earnings</i> and we will pay you, usually within 3 working days. Delivery fees are not part of your earnings.</li>
+<li><b>Promote your ad (optional)</b>Tap <i>Promote</i> on your ad, choose a plan, pay by Mobile Money and enter the transaction ID. We approve within 24 hours, and promoted ads show first with a ⭐ badge.</li>
+</ol>
+<div class="tip">⚠️ Only sell items you own and are allowed to sell. Illegal items, stolen or counterfeit goods, weapons, drugs and adult content are not allowed and will be removed.</div>`],
+ht:["🛡️ Safety tips",`<p class="m">Most deals go smoothly. These habits keep it that way.</p>
+<div class="gsec"><h4>Before you buy</h4><ul>
+<li>Read the whole ad and look at every photo. Be careful with prices that look too good to be true.</li>
+<li>Check the seller's profile: ✔ Verified phone, rating, and reviews from verified buyers.</li>
+<li>Ask questions in DealMart messages or on WhatsApp. A real seller answers clearly and does not rush you.</li></ul></div>
+<div class="gsec"><h4>Paying safely</h4><ul>
+<li>Use checkout (Card or Mobile Money through Paystack, or cash on delivery up to ${money(RULES.cod)}). We never see or store your card details.</li>
+<li>Never send money outside the site to someone you do not know, including "reservation" or "delivery" fees.</li>
+<li>Never share your Mobile Money PIN, a verification code or your password with anyone, including people who say they work for DealMart.</li></ul></div>
+<div class="gsec"><h4>Delivery and meeting</h4><ul>
+<li>Choose a delivery day and time when you will be reachable, and give a clear street, area or landmark.</li>
+<li>If you meet in person, pick a busy public place in daylight and tell a friend or family member where you are going. Bring someone with you for expensive items.</li>
+<li>Inspect the item before you accept it. Switch on phones and electronics and test them. For vehicles, check the ownership documents and take a test drive with someone you trust.</li></ul></div>
+<div class="gsec"><h4>Red flags</h4><ul>
+<li>The seller wants to move to another app, or asks you to pay first.</li>
+<li>Pressure like "someone else is paying now", or a request for your PIN or a code.</li>
+<li>Photos that look like stock pictures, or a description that does not match the photos.</li></ul></div>
+<div class="gsec"><h4>If you are selling</h4><ul>
+<li>Do not hand over an item until you have confirmed the money has really arrived in your own account. Ignore "overpayment" stories and screenshots of payments.</li>
+<li>Share only the personal details you need to. Keep chats in DealMart messages where you can.</li></ul></div>
+<div class="gsec"><h4>If something goes wrong</h4><ul>
+<li>See a suspicious ad? Open it and tap <i>Report this ad</i>.</li>
+<li>Problem with an order? Contact us within 48 hours of the delivery date with your order number.</li>
+<li>If you feel threatened or in danger, contact the police first.</li></ul></div>`]
+}[k]);
+["hb","hs","ht"].forEach(k=>$(k).onclick=()=>{const g=guide(k);M(`<h3>${g[0]}</h3>${g[1]}${gLinks}<div class="row"><button class="btn" onclick="X()">Got it</button></div>`)});
 
 $("loc").innerHTML=opts(LOCS);
 ["q","loc","so","fk","mn","mx"].forEach(i=>$(i).addEventListener(i=="q"||i=="mn"||i=="mx"?"input":"change",()=>{st.n=8;draw()}));
@@ -241,9 +334,9 @@ $("more").onclick=()=>{st.n+=8;draw()};
 $("sellB").onclick=()=>sell();$("msgB").onclick=inbox;$("xf").onclick=moreFilters;$("cartB").onclick=showCart;$("acct").onclick=account;
 $("wishB").onclick=()=>{st.wl=!st.wl;st.n=8;draw()};
 badges();
-(async()=>{const f=await api("/api/fields");if(f.fields)FLD=f.fields;if(f.rules)RULES=f.rules;const m=await api("/api/me");if(m.user){user=m.user;loadDeals();pollInbox()}
+(async()=>{const f=await api("/api/fields");if(f.fields)FLD=f.fields;if(f.rules)RULES=f.rules;
+  const si=await api("/api/site");if(si.whatsapp){$("wa").href="https://wa.me/"+si.whatsapp.replace(/\D/g,"").replace(/^0/,"233")+"?text="+encodeURIComponent("Hi DealMart, I need help");$("wa").hidden=false}const m=await api("/api/me");if(m.user){user=m.user;loadDeals();pollInbox()}badges();
   const rf=new URLSearchParams(location.search).get("reference");if(rf){history.replaceState(null,"",location.pathname);if(user)verifyReturn(rf);else toast("Sign in to confirm your payment")}const r=await api("/api/ads");if(r.error)toast(r.error);else ads=r.ads;draw()})();
-setCount(0);setInterval(pollInbox,15000);
 
 /* ---- category fields ---- */
 function fields(){
@@ -288,7 +381,7 @@ async function loadThread(first){
 }
 async function sendMsg(){const i=$("cT"),v=i.value.trim();if(!v)return;i.value="";const r=await api("/api/threads/"+curThread+"/messages","POST",{body:v});if(r.error){i.value=v;return toast(r.error)}loadThread(true)}
 function offerBox(){M(`<h3>Make an offer</h3><p class="m">Enter the price you want to pay (GH₵). The other person can accept or decline.</p><label>Your offer (GH₵)</label><input id="oA" type="number" min="1" inputmode="decimal"><div class="err" id="er"></div><div class="row"><button class="btn alt" onclick="openThread(${curThread})">Back</button><button class="btn" onclick="sendOffer()">Send offer</button></div>`)}
-async function sendOffer(){const v=$("oA").value;if(!(+v>0))return $("er").textContent="Enter an amount above 0.";const r=await api("/api/threads/"+curThread+"/messages","POST",{offer:+v});if(r.error)return $("er").textContent=r.error;toast("Offer sent");openThread(curThread)}
+async function sendOffer(){const v=$("oA").value;if(!(+v>0))return invalid("oA","Enter an amount above 0.");const r=await api("/api/threads/"+curThread+"/messages","POST",{offer:+v});if(r.error)return invalid("oA",r.error);toast("Offer sent");openThread(curThread)}
 async function respond(id,accept){const r=await api("/api/messages/"+id+"/respond","POST",{accept:!!accept});if(r.error)return toast(r.error);loadDeals();loadThread(true)}
 
 /* ---- filters using category details ---- */
@@ -326,7 +419,8 @@ async function promote(id){
 }
 const pickPlan=(id,el)=>{promoPick=id;[...el.parentNode.children].forEach(b=>b.classList.toggle("on",b==el))};
 async function sendPromo(id){
-  const r=await api("/api/ads/"+id+"/promote","POST",{plan:promoPick,ref:$("pR").value});if(r.error)return $("er").textContent=r.error;
+  if(!$("pR").value.trim())return invalid("pR","Enter the Mobile Money transaction ID.");
+  const r=await api("/api/ads/"+id+"/promote","POST",{plan:promoPick,ref:$("pR").value});if(r.error)return invalid("pR",r.error);
   M('<div class="ok">✓</div><h3 style="text-align:center">Request sent</h3><p class="m" style="text-align:center">We will check your payment and switch the promotion on. Follow it under My ads.</p><button class="btn" onclick="X()">Done</button>');
 }
 const REASONS=["Scam or fraud","Prohibited item","Wrong category","Duplicate ad","Offensive content","Other"];
@@ -350,7 +444,7 @@ async function adminRep(id,action){const r=await api("/api/admin/reports/"+id,"P
 /* ---- returning from Paystack ---- */
 async function verifyReturn(ref){
   const r=await api("/api/pay/verify","POST",{reference:ref});if(r.error)return toast(r.error);
-  if(r.paid){cart={};S("ws_cart",cart);badges();M(`<div class="ok">✓</div><h3 style="text-align:center">Payment received</h3><p style="text-align:center">Thank you! Your order number is <b>${E(r.no)}</b>.</p>${r.dday?`<div class="promise" style="text-align:center">🚚 Arrives <b>${fmtDay(r.dday)}</b>, ${E(r.slot)}</div>`:""}<p class="m" style="text-align:center">Total ${money(r.total)} · paid with Paystack</p><button class="btn" onclick="X()">Done</button>`)}
+  if(r.paid){(r.ids||[]).forEach(id=>delete cart[id]);S("ws_cart",cart);badges();M(`<div class="ok">✓</div><h3 style="text-align:center">Payment received</h3><p style="text-align:center">Thank you! Your order number is <b>${E(r.no)}</b>.</p>${r.dday?`<div class="promise" style="text-align:center">🚚 Arrives <b>${fmtDay(r.dday)}</b>, ${E(r.slot)}</div>`:""}<p class="m" style="text-align:center">Total ${money(r.total)} · paid with Paystack</p><button class="btn" onclick="X()">Done</button>`)}
   else M('<h3>Payment not completed</h3><p class="m">We did not receive your payment. Your cart is still saved, so you can try again.</p><button class="btn" onclick="showCart()">Back to cart</button>');
 }
 
@@ -360,51 +454,100 @@ const D_LBL={placed:"Order placed",confirmed:"Confirmed",out:"Out for delivery",
 const fmtDay=d=>new Date(d+"T12:00:00").toLocaleDateString(undefined,{weekday:"short",day:"numeric",month:"short"});
 const tierFee=(D,x)=>{for(const t of D.tiers)if(t.below==null||x<t.below)return t.fee;return 0};
 const calcFee=(D,rows,reg)=>(D.mode=="order"?tierFee(D,rows.reduce((n,r)=>n+dp(r.a)*r.q,0)):rows.reduce((n,r)=>n+tierFee(D,dp(r.a))*(D.perUnit?r.q:1),0))+((D.regionFees||{})[reg]||0);
+let unsel=new Set();
+const selRows=()=>cartRows().filter(r=>!unsel.has(r.a.id));
 const cartRows=()=>Object.entries(cart).map(([id,q])=>({a:ads.find(x=>x.id==id),q})).filter(r=>r.a);
 const feeNote=()=>{const D=CO.info.delivery;return D.mode=="order"?"Delivery is based on your order total.":"Delivery per product: "+D.tiers.map(t=>t.below==null?money(t.fee)+" for the rest":money(t.fee)+" under "+money(t.below)).join(", ")+(D.perUnit?" (for each item).":".")};
 const payList=sub=>[["Card","💳","Card","Visa or Mastercard. You enter your details on Paystack's secure page.",!RULES.online],["Mobile Money","📱","Mobile Money","MTN, Telecel or AirtelTigo. Approve the prompt on your phone.",!RULES.online],["Cash on delivery","💵","Cash on delivery","Pay the rider when your order arrives.",sub>RULES.cod]];
 
 async function openCheckout(){
   if(!user){X();return auth("login","Sign in to check out.")}
-  const rows=cartRows(),sub=rows.reduce((n,r)=>n+dp(r.a)*r.q,0);
+  const rows=selRows(),sub=rows.reduce((n,r)=>n+dp(r.a)*r.q,0);
   if(!rows.length)return;
   if(sub<RULES.min){toast("Minimum order is "+money(RULES.min));return showCart()}
   const [i,a]=await Promise.all([api("/api/delivery"),api("/api/addresses")]);
   if(i.error||a.error)return toast(i.error||a.error);
   RULES=i.rules;
-  CO={step:0,info:i,addrs:a.addresses,addrId:a.addresses[0]?a.addresses[0].id:null,form:a.addresses.length?null:{label:"Home",name:user.name,phone:user.phone},day:i.days[0]||"",slot:i.slots[1]||i.slots[0]||"",pay:"",notes:""};
+  CO={step:0,err:"",info:i,addrs:a.addresses,addrId:a.addresses[0]?a.addresses[0].id:null,form:a.addresses.length?null:{label:"Home",name:user.name,phone:user.phone},day:i.days[0]||"",slot:i.slots[1]||i.slots[0]||"",pay:"",notes:""};
   X();$("co").classList.add("open");document.body.style.overflow="hidden";coRender();
 }
 const coClose=()=>{$("co").classList.remove("open");document.body.style.overflow=""};
-const coGo=n=>{CO.step=n;coRender();$("co").scrollTop=0};
+const coOpen=()=>$("co").classList.contains("open");
+const coGo=n=>{CO.step=n;CO.err="";coRender();$("co").scrollTop=0};
+const newForm=()=>({label:CO.addrs.length?"":"Home",name:user.name,phone:user.phone});
+function coLeave(fn){
+  confirmAction("Are you sure you want to go back?","Your order has not been placed yet. Your cart is saved, but the delivery choices on this page will not be kept.","Yes, go back",fn,"Stay in checkout",()=>{});
+}
+function coBack(){
+  if(CO.step>0)return coGo(CO.step-1);
+  coLeave(()=>{coClose();showCart()});
+}
+const fail=msg=>{CO.err=msg;CO.focusErr=1;coRender();return false};
+const errBox=()=>CO.err?`<div class="err cerr" role="alert">⚠️ ${E(CO.err)}</div>`:"";
+async function coNext(){
+  if(CO.step===0){
+    if(CO.form&&!(await coSaveAddr()))return;
+    const A=CO.addrs.find(x=>x.id==CO.addrId);
+    if(!A){CO.form={...newForm(),_invalid:{}};return fail("Please add a delivery address to continue.")}
+    const v=validateAddressForm(A);
+    if(Object.keys(v.invalid).length){CO.form={...A,_invalid:v.invalid};return fail(v.error)}
+    if(!CO.day)return fail("Please choose a delivery day.");
+    if(!CO.slot)return fail("Please choose a delivery time window.");
+    return coGo(1);
+  }
+  if(CO.step===1){
+    if(!CO.pay)return fail("Please choose how you want to pay.");
+    return coGo(2);
+  }
+}
 function coRender(){
-  const rows=cartRows(),sub=rows.reduce((n,r)=>n+dp(r.a)*r.q,0),A=CO.addrs.find(x=>x.id==CO.addrId),fee=A?calcFee(CO.info.delivery,rows,A.region):0,total=sub+fee,st=CO.step;
+  const rows=selRows(),sub=rows.reduce((n,r)=>n+dp(r.a)*r.q,0),A=CO.addrs.find(x=>x.id==CO.addrId),fee=A?calcFee(CO.info.delivery,rows,A.region):0,total=sub+fee,st=CO.step;
   if(!CO.pay){const f=payList(sub).find(p=>!p[4]);if(f)CO.pay=f[0]}
-  const blocked=(st==0&&!(A&&CO.day&&CO.slot&&!CO.form))||(st==1&&!CO.pay);
-  $("co").innerHTML=`<div class="cohd"><button onclick="${st?"coGo("+(st-1)+")":"coClose();showCart()"}">‹ Back</button><b><img src="logo-icon.png" alt="" style="width:24px;height:24px;border-radius:6px;vertical-align:middle;margin-right:6px">Secure checkout</b><span style="width:60px"></span></div>
+  $("co").innerHTML=`<div class="cohd"><button onclick="coBack()">‹ Back</button><b><img src="logo-icon.png" alt="" style="width:24px;height:24px;border-radius:6px;vertical-align:middle;margin-right:6px">Secure checkout</b><span style="width:60px"></span></div>
   <div class="steps">${["Delivery","Payment","Review"].map((n,i)=>`<div class="${i==st?"on":i<st?"dn":""}">${i+1}. ${n}</div>`).join("")}</div>
   <div class="cowrap"><div>${[coDelivery,coPay,coReview][st](A,rows,sub,fee)}</div><div class="cc">${coSummary(rows,sub,fee,total,A)}</div></div>
-  <div class="cobar"><div class="tt"><span class="m">${A&&CO.day&&CO.slot?"🚚 Arrives "+fmtDay(CO.day)+", "+E(CO.slot):"Choose your delivery"}</span><br><b>${money(total)}</b></div><button class="btn" id="cobtn" onclick="${st==2?"coPlace()":"coGo("+(st+1)+")"}"${blocked?" disabled":""}>${st==2?"Place order":"Continue"}</button></div>`;
+  <div class="cobar"><div class="tt"><span class="m">${A&&CO.day&&CO.slot?"🚚 Arrives "+fmtDay(CO.day)+", "+E(CO.slot):"Choose your delivery"}</span><br><b>${money(total)}</b></div><button class="btn" id="cobtn" onclick="${st==2?"coPlace()":"coNext()"}">${st==2?"Place order":"Continue"}</button></div>`;
+  if(CO.focusErr){CO.focusErr=0;const t=$("co").querySelector(".field-invalid")||$("co").querySelector(".cerr");if(t){t.scrollIntoView({block:"center",behavior:"smooth"});if(/^(INPUT|SELECT|TEXTAREA)$/.test(t.tagName))t.focus({preventScroll:true})}}
 }
+const validateAddressForm=(f={})=>{
+  const v=k=>String(f[k]||"").trim(),invalid={};
+  if(v("name").length<2)invalid.name="Enter the receiver's full name.";
+  if(!PHONE_RE.test(v("phone")))invalid.phone="Enter a valid phone number, e.g. 0244 000 000.";
+  if(v("addr").length<4)invalid.addr="Enter your street, area or landmark so the rider can find you.";
+  const n=Object.keys(invalid).length;
+  return {invalid,error:!n?"":invalid.addr&&n==1?"Please enter your street, area or landmark.":"Please complete the highlighted fields to continue."};
+};
 const coSummary=(rows,sub,fee,total,A)=>`<h4>Order summary</h4>${rows.map(r=>`<div class="line"><div class="ic" ${bg(r.a)}>${r.a.imgs&&r.a.imgs[0]?"":r.a.e}</div><div class="g">${E(r.a.t)}<br><span class="m">${money(dp(r.a))} × ${r.q}</span></div><b>${money(dp(r.a)*r.q)}</b></div>`).join("")}<div class="tot"><span>Subtotal</span><span>${money(sub)}</span></div><div class="tot"><span>Delivery${A?" to "+E(A.region):""}</span><span>${A?money(fee):"–"}</span></div><div class="tot"><b>Total</b><b>${money(total)}</b></div><p class="m" style="font-size:12px">${feeNote()}</p>`;
-const coDelivery=()=>{
+const coDelivery=(A,rows,sub,fee)=>{
   const I=CO.info;
-  return `<div class="cc"><h4>1. Where should we deliver?</h4>${CO.addrs.map(a=>`<div class="opt${a.id==CO.addrId&&!CO.form?" on":""}" onclick="CO.addrId=${a.id};CO.form=null;coRender()"><span class="rad"></span><div style="flex:1"><b>${E(a.label)}</b> · ${E(a.name)} · ${E(a.phone)}<br><span class="m">${E(a.addr)}, ${E(a.region)}${a.gps?" · "+E(a.gps):""}</span></div><button class="sm" onclick="event.stopPropagation();coAddr(${a.id})">Edit</button></div>`).join("")}${CO.form?coForm():'<button class="btn alt" onclick="coAddr()">＋ Add a new address</button>'}</div>
-  <div class="cc" style="margin-top:14px"><h4>2. Delivery day</h4><div class="days">${I.days.map(d=>{const t=new Date(d+"T12:00:00");return`<button class="dchip${d==CO.day?" on":""}" onclick="CO.day='${d}';coRender()"><b>${t.toLocaleDateString(undefined,{weekday:"short"})}</b><span>${t.getDate()}</span><b>${t.toLocaleDateString(undefined,{month:"short"})}</b></button>`}).join("")}</div>
-  <h4 style="margin-top:14px">3. Time window</h4><div class="slots">${I.slots.map(s=>`<button class="dchip${s==CO.slot?" on":""}" data-s="${E(s)}" onclick="CO.slot=this.dataset.s;coRender()"><span style="font-size:14px">${E(s)}</span></button>`).join("")}</div>
+  return `<div class="cc"><h4>1. Where should we deliver?</h4>${errBox()}${CO.addrs.map(a=>`<div class="opt${a.id==CO.addrId&&!CO.form?" on":""}" onclick="CO.addrId=${a.id};CO.form=null;CO.err='';coRender()"><span class="rad"></span><div style="flex:1"><b>${E(a.label)}</b> · ${E(a.name)} · ${E(a.phone)}<br><span class="m">${E(a.addr)}, ${E(a.region)}${a.gps?" · "+E(a.gps):""}</span></div><button class="sm" onclick="event.stopPropagation();coAddr(${a.id})">Edit</button></div>`).join("")}${CO.form?coForm():`<button class="btn alt" onclick="coAddr()">＋ Add a new address</button>`}</div>
+  <div class="cc" style="margin-top:14px"><h4>2. Delivery day</h4><div class="days">${I.days.map(d=>{const t=new Date(d+"T12:00:00");return`<button class="dchip${d==CO.day?" on":""}" onclick="CO.day='${d}';CO.err='';coRender()"><b>${t.toLocaleDateString(undefined,{weekday:"short"})}</b><span>${t.getDate()}</span><b>${t.toLocaleDateString(undefined,{month:"short"})}</b></button>`}).join("")}</div>
+  <h4 style="margin-top:14px">3. Time window</h4><div class="slots">${I.slots.map(s=>`<button class="dchip${s==CO.slot?" on":""}" data-s="${E(s)}" onclick="CO.slot=this.dataset.s;CO.err='';coRender()"><span style="font-size:14px">${E(s)}</span></button>`).join("")}</div>
   <label>Delivery notes (optional)</label><textarea rows="2" maxlength="200" placeholder="Gate code, landmark, who to ask for…" oninput="CO.notes=this.value">${E(CO.notes)}</textarea></div>`;
 };
-const coForm=()=>{
-  const f=CO.form,F=(k,l,ph,t)=>`<label>${l}</label><input type="${t||"text"}" placeholder="${ph}" value="${E(f[k]||"")}" oninput="CO.form.${k}=this.value">`;
-  return `<div class="cc" style="margin-top:8px;background:var(--bg)"><h4>${f.id?"Edit address":"New address"}</h4>${F("label","Label","Home, Work…")}${F("name","Receiver's name","Full name")}${F("phone","Phone number","0244 000 000","tel")}<label>Region</label><select onchange="CO.form.region=this.value">${LOCS.slice(1).map(r=>`<option${(f.region||LOCS[1])==r?" selected":""}>${E(r)}</option>`).join("")}</select>${F("addr","Street, area or landmark","e.g. House 12, Oyarifa Road")}${F("gps","GhanaPost digital address (optional)","GA-123-4567")}<div class="err" id="er"></div><div class="row" style="margin-top:10px">${f.id?'<button class="btn alt" onclick="coDelAddr()">Delete</button>':""}${CO.addrs.length?'<button class="btn alt" onclick="CO.form=null;coRender()">Cancel</button>':""}<button class="btn" onclick="coSaveAddr()">Save address</button></div></div>`;
+const coIn=(el,k)=>{
+  CO.form[k]=el.value;el.classList.remove("field-invalid");el.removeAttribute("aria-invalid");
+  const fe=el.nextElementSibling;if(fe&&fe.classList.contains("fe"))fe.textContent="";
+  if(CO.form._invalid)delete CO.form._invalid[k];
 };
-const coAddr=id=>{CO.form=id?{...CO.addrs.find(a=>a.id==id)}:{label:CO.addrs.length?"":"Home",name:user.name,phone:user.phone};coRender()};
+const coForm=()=>{
+  const f=CO.form||{},inv=f._invalid||{};
+  const F=(k,l,ph,t)=>`<label for="cf_${k}">${l}</label><input id="cf_${k}" type="${t||"text"}" class="${inv[k]?"field-invalid":""}"${inv[k]?' aria-invalid="true"':""} placeholder="${ph}" value="${E(f[k]||"")}" oninput="coIn(this,'${k}')"><div class="fe">${E(inv[k]||"")}</div>`;
+  const region=f.region||LOCS[1]||"Greater Accra";
+  return `<div class="cc" style="margin-top:8px;background:var(--bg)"><h4>${f.id?"Edit address":"New address"}</h4>${F("label","Label (optional)","Home, Work…")}${F("name","Receiver's name *","Full name")}${F("phone","Phone number *","0244 000 000","tel")}<label>Region</label><select onchange="CO.form.region=this.value">${LOCS.slice(1).map(r=>`<option${region==r?" selected":""}>${E(r)}</option>`).join("")}</select>${F("addr","Street, area or landmark *","e.g. House 12, Oyarifa Road")}${F("gps","GhanaPost digital address (optional)","GA-123-4567")}${f.error?`<div class="err cerr" role="alert">${E(f.error)}</div>`:""}<div class="row" style="margin-top:10px">${f.id?'<button class="btn alt" onclick="coDelAddr()">Delete</button>':""}${CO.addrs.length?'<button class="btn alt" onclick="CO.form=null;CO.err=\'\';coRender()">Cancel</button>':""}<button class="btn" onclick="coSaveAddr()">Save address</button></div></div>`;
+};
+const coAddr=id=>{CO.err="";CO.form=id?{...CO.addrs.find(a=>a.id==id)}:newForm();coRender()};
 async function coSaveAddr(){
-  const f=CO.form,r=await api("/api/addresses","POST",{...f,region:f.region||LOCS[1]});if(r.error)return $("er").textContent=r.error;
-  CO.addrs=(await api("/api/addresses")).addresses||CO.addrs;CO.addrId=r.id;CO.form=null;coRender();
+  const f=CO.form;if(!f)return true;
+  const {invalid,error}=validateAddressForm(f);
+  if(Object.keys(invalid).length){CO.form={...f,_invalid:invalid,error:""};return fail(error)}
+  const body={id:f.id,label:String(f.label||"").trim(),name:f.name.trim(),phone:f.phone.trim(),region:f.region||LOCS[1],addr:f.addr.trim(),gps:String(f.gps||"").trim()};
+  const r=await api("/api/addresses","POST",body);
+  if(r.error){CO.form={...f,error:r.error};return fail(r.error)}
+  CO.addrs=(await api("/api/addresses")).addresses||CO.addrs;CO.addrId=r.id;CO.form=null;CO.err="";coRender();return true;
 }
 const coDelAddr=()=>ask("Delete this address?","You can add it again later.","Delete",async()=>{const id=CO.form.id;await api("/api/addresses/"+id,"DELETE");CO.addrs=CO.addrs.filter(a=>a.id!=id);CO.addrId=CO.addrs[0]?CO.addrs[0].id:null;CO.form=CO.addrs.length?null:{label:"Home",name:user.name,phone:user.phone};coRender()});
-const coPay=(A,rows,sub)=>`<div class="cc"><h4>How would you like to pay?</h4>${payList(sub).map(p=>`<button class="opt${CO.pay==p[0]?" on":""}"${p[4]?" disabled":""} onclick="CO.pay='${p[0]}';coRender()"><span class="rad"></span><div><b>${p[1]} ${p[2]}</b><br><span class="m">${p[4]?(p[0]=="Cash on delivery"?"Only for orders of "+money(RULES.cod)+" or less.":"Not set up yet."):p[3]}</span></div></button>`).join("")}<p class="m" style="font-size:12px">🔒 We never see or store your card details.</p></div>`;
+const coPay=(A,rows,sub)=>`<div class="cc"><h4>How would you like to pay?</h4>${errBox()}${payList(sub).map(p=>`<button class="opt${CO.pay==p[0]?" on":""}"${p[4]?" disabled":""} onclick="CO.pay='${p[0]}';CO.err='';coRender()"><span class="rad"></span><div><b>${p[1]} ${p[2]}</b><br><span class="m">${p[4]?(p[0]=="Cash on delivery"?"Only for orders of "+money(RULES.cod)+" or less.":"Not set up yet."):p[3]}</span></div></button>`).join("")}<p class="m" style="font-size:12px">🔒 We never see or store your card details.</p></div>`;
 const coReview=(A,rows,sub,fee)=>`<div class="cc"><h4>Review your order</h4>
   <div class="line"><div class="g"><b>📍 Delivery address</b><br><span class="m">${E(A.name)} · ${E(A.phone)}<br>${E(A.addr)}, ${E(A.region)}${A.gps?" · "+E(A.gps):""}</span></div><button class="sm" onclick="coGo(0)">Edit</button></div>
   <div class="line"><div class="g"><b>🕒 Delivery time</b><br><span class="m">${fmtDay(CO.day)}, ${E(CO.slot)}${CO.notes?"<br>Note: "+E(CO.notes):""}</span></div><button class="sm" onclick="coGo(0)">Edit</button></div>
@@ -412,10 +555,10 @@ const coReview=(A,rows,sub,fee)=>`<div class="cc"><h4>Review your order</h4>
   <p class="m" style="font-size:12px;margin-top:10px">You will pay ${money(sub+fee)}. You can change the delivery day, time or address from My orders until the order is out for delivery.</p></div>`;
 async function coPlace(){
   const b=$("cobtn"),A=CO.addrs.find(x=>x.id==CO.addrId);b.disabled=true;b.textContent="Placing order…";
-  const r=await api("/api/orders","POST",{items:Object.entries(cart).map(([id,q])=>({id:+id,q})),address:{name:A.name,phone:A.phone,region:A.region,addr:A.addr,gps:A.gps},day:CO.day,slot:CO.slot,pay:CO.pay,notes:CO.notes});
+  const r=await api("/api/orders","POST",{items:selRows().map(r=>({id:r.a.id,q:r.q})),address:{name:A.name,phone:A.phone,region:A.region,addr:A.addr,gps:A.gps},day:CO.day,slot:CO.slot,pay:CO.pay,notes:CO.notes});
   if(r.error){b.disabled=false;b.textContent="Place order";return toast(r.error)}
-  if(r.online){b.textContent="Opening Paystack…";location.href=r.url;return}
-  cart={};S("ws_cart",cart);badges();coClose();
+  if(r.online){b.textContent="Opening Paystack…";CO.leaving=1;location.href=r.url;return}
+  selRows().forEach(r=>delete cart[r.a.id]);S("ws_cart",cart);badges();coClose();
   M(`<div class="ok">✓</div><h3 style="text-align:center">Order placed</h3><p style="text-align:center">Your order number is <b>${E(r.no)}</b>.</p><div class="promise" style="text-align:center">🚚 Arrives <b>${fmtDay(r.dday)}</b>, ${E(r.slot)}</div><p class="m" style="text-align:center">Total ${money(r.total)} (delivery ${money(r.fee)}) · ${E(r.pay)}</p><div class="row"><button class="btn alt" onclick="X()">Keep shopping</button><button class="btn" onclick="account()">Track my order</button></div>`);
 }
 
@@ -440,8 +583,11 @@ async function editDelivery(no){
   <div class="row"><button class="btn alt" onclick="orderView('${E(o.no)}')">Cancel</button><button class="btn" onclick="saveDelivery('${E(o.no)}')">Save changes</button></div>`);
 }
 async function saveDelivery(no){
+  if($("eN").value.trim().length<2)return invalid("eN","Enter the receiver's name.");
+  if(!PHONE_RE.test($("eP").value.trim()))return invalid("eP","Enter a valid phone number.");
+  if($("eA").value.trim().length<4)return invalid("eA","Enter the street, area or landmark.");
   const r=await api("/api/orders/"+no+"/delivery","PUT",{address:{name:$("eN").value,phone:$("eP").value,addr:$("eA").value,gps:$("eG").value,notes:$("eT").value},day:$("eD").value,slot:$("eS").value});
-  if(r.error)return $("er").textContent=r.error;toast("Delivery details updated");account();
+  if(r.error)return invalid(/phone/i.test(r.error)?"eP":/address|street/i.test(r.error)?"eA":[],r.error);toast("Delivery details updated");account();
 }
 async function adminOrders(){
   const r=await api("/api/admin/orders");if(r.error)return toast(r.error);
@@ -449,3 +595,79 @@ async function adminOrders(){
   M(`<h3>🚚 Deliveries (${r.orders.length})</h3>${r.orders.length?r.orders.map(o=>`<div class="line"><div class="g"><b>${o.dday?fmtDay(o.dday)+", "+E(o.slot):"No date"}</b> <span class="vb">${E(D_LBL[o.dstatus])}</span><br>${E(o.dname||o.uname||"")} · ${E(o.dphone||"")}<br><span class="m">${E(o.daddr||"")}${o.region?", "+E(o.region):""}${o.gps?" · "+E(o.gps):""}${o.notes?"<br>Note: "+E(o.notes):""}<br>${o.items.map(i=>E(i.t)+" ×"+i.q).join(", ")} · ${money(o.total)} · ${E(o.pay)}${o.status=="paid"?" ✓ paid":o.pay=="Cash on delivery"?" · collect cash":""}</span></div><button class="sm" onclick="adminAdv('${E(o.no)}')">${nx[o.dstatus]}</button></div>`).join(""):'<p class="m">No deliveries waiting.</p>'}<div class="row"><button class="btn" onclick="account()">Back</button></div>`);
 }
 async function adminAdv(no){const r=await api("/api/admin/orders/"+no+"/advance","POST");if(r.error)return toast(r.error);adminOrders()}
+
+/* ---- sell gate and logo ---- */
+function sellGate(){
+  afterAuth=()=>sell();
+  M(`<img class="lw" src="logo-wide.png" alt="DealMart"><h3 style="text-align:center">Sign in to start selling</h3><p class="m" style="text-align:center">You need a DealMart account to post an ad. It only takes a minute.</p><div class="row"><button class="btn" onclick="auth('register')">Create account</button><button class="btn alt" onclick="auth('login')">Sign in</button></div>`);
+}
+function goHome(){X();coClose();st.cat=-1;st.n=8;st.wl=false;st.af={};st.afc=-2;$("q").value="";draw();scrollTo({top:0,behavior:"smooth"})}
+document.querySelector(".logo").onclick=e=>{e.preventDefault();coOpen()?coLeave(goHome):goHome()};
+window.addEventListener("beforeunload",e=>{if(coOpen()&&!CO.leaving){e.preventDefault();e.returnValue=""}});
+/* ---- photo gallery ---- */
+let gal=[],gi=0,galId=0;
+const galHtml=a=>{
+  gal=a.imgs||[];gi=0;galId=a.id;
+  if(!gal.length)return `<div class="dv">${a.e}</div>`;
+  setTimeout(galInit,0);
+  return `<div class="gal" id="gal"><img id="gm" src="${E(gal[0])}" alt="${E(a.t)}" onclick="lightbox()">${gal.length>1?`<button class="gn gp" aria-label="Previous photo" onclick="gGo(-1)">‹</button><button class="gn gx" aria-label="Next photo" onclick="gGo(1)">›</button>`:""}<span class="gc" id="gc">1 / ${gal.length}</span></div>${gal.length>1?`<div class="thumbs">${gal.map((s,i)=>`<img alt="Photo ${i+1}" src="${E(s)}" onclick="gSet(${i})">`).join("")}</div>`:""}`;
+};
+const gSet=i=>{gi=(i+gal.length)%gal.length;const m=$("gm");if(m){m.src=gal[gi];$("gc").textContent=(gi+1)+" / "+gal.length}};
+const gGo=d=>gSet(gi+d);
+const galInit=()=>{const g=$("gal");if(!g||gal.length<2)return;let x0=0;g.ontouchstart=e=>{x0=e.touches[0].clientX};g.ontouchend=e=>{const d=e.changedTouches[0].clientX-x0;if(Math.abs(d)>40)gGo(d<0?1:-1)}};
+const lightbox=()=>M(`<img id="lb" src="${E(gal[gi])}" alt="" style="width:100%;border-radius:10px"><div class="row">${gal.length>1?'<button class="btn alt" onclick="gGo(-1);lightbox()">‹ Prev</button>':""}<button class="btn" onclick="view(galId)">Back to ad</button>${gal.length>1?'<button class="btn alt" onclick="gGo(1);lightbox()">Next ›</button>':""}</div>`);
+document.addEventListener("keydown",e=>{if($("m").classList.contains("open")&&$("gm")){if(e.key=="ArrowRight")gGo(1);if(e.key=="ArrowLeft")gGo(-1)}});
+/* ---- forgot / change password ---- */
+let myEarn={},resetEmail="";
+function forgot(){
+  const v=$("aE")?$("aE").value:"";
+  M(`<img class="lw" src="logo-wide.png" alt="DealMart"><h3>Reset your password</h3><p class="m">Enter your account email and we will send you a 6-digit code.</p><label>Email</label><input id="rsE" type="email" value="${E(v)}"><div class="err" id="er"></div><div class="row"><button class="btn alt" onclick="auth('login')">Back</button><button class="btn" onclick="sendReset()">Send code</button></div>`);
+}
+async function sendReset(){
+  const e=$("rsE").value.trim();if(!isValidEmail(e))return invalid("rsE","Enter a valid email address.");
+  const r=await api("/api/forgot","POST",{email:e});if(r.error)return invalid("rsE",r.error);
+  resetEmail=e;
+  M(`<h3>Enter your code</h3><p class="m">If ${E(e)} has an account, we have sent it a 6-digit code. It works for 15 minutes. Check your spam folder too.</p><label>6-digit code</label><input id="rsC" inputmode="numeric" maxlength="6"><label>New password (8 or more characters)</label><input id="rsW" type="password"><div class="err" id="er"></div><div class="row"><button class="btn alt" onclick="forgot()">Back</button><button class="btn" onclick="doReset()">Set new password</button></div>`);
+}
+async function doReset(){
+  if(!/^\d{6}$/.test($("rsC").value.trim()))return invalid("rsC","Enter the 6-digit code we sent you.");
+  if($("rsW").value.length<8)return invalid("rsW","Your new password must be at least 8 characters.");
+  const r=await api("/api/reset","POST",{email:resetEmail,code:$("rsC").value.trim(),password:$("rsW").value});
+  if(r.error)return invalid(/password/i.test(r.error)?"rsW":"rsC",r.error);login(r.user);
+}
+function changePw(){M('<h3>Change password</h3><label>Current password</label><input id="cwC" type="password"><label>New password (8 or more characters)</label><input id="cwN" type="password"><div class="err" id="er"></div><div class="row"><button class="btn alt" onclick="account()">Back</button><button class="btn" onclick="doChangePw()">Save password</button></div>')}
+async function doChangePw(){
+  if(!$("cwC").value)return invalid("cwC","Enter your current password.");
+  if($("cwN").value.length<8)return invalid("cwN","Your new password must be at least 8 characters.");
+  const r=await api("/api/password","POST",{current:$("cwC").value,password:$("cwN").value});
+  if(r.error)return invalid(/current/i.test(r.error)?"cwC":"cwN",r.error);toast("Password changed");account();
+}
+
+/* ---- seller earnings and admin payouts ---- */
+const earnSection=()=>{
+  const e=myEarn;if(!e||e.error||!(e.items.length||e.details.number||ads.some(a=>a.o===user.id)))return"";
+  return `<h3 style="margin-top:16px">💰 My earnings</h3><div class="tot"><span>Waiting to be paid out</span><b>${money(e.pending)}</b></div><div class="tot"><span>Paid out so far</span><span>${money(e.paid)}</span></div><p class="m" style="font-size:12px">You earn the item price minus DealMart's ${e.rate}% commission once an order is delivered. Delivery fees are not part of your earnings.</p>${e.details.number?`<p class="m" style="font-size:12px">Paying to ${E(e.details.net)} ${E(e.details.number)} (${E(e.details.name)})</p>`:'<p class="err">Add your Mobile Money details so we can pay you.</p>'}<div class="row"><button class="btn alt" onclick="payoutForm()">${e.details.number?"Edit":"Add"} payout details</button>${e.items.length?'<button class="btn alt" onclick="earnList()">See earnings</button>':""}</div>`;
+};
+function payoutForm(){
+  const d=myEarn.details||{};
+  M(`<h3>Payout details</h3><p class="m">We pay your earnings to this Mobile Money number after your orders are delivered.</p><label>Network</label><select id="poN">${["MTN","Telecel","AirtelTigo"].map(n=>`<option${d.net==n?" selected":""}>${n}</option>`).join("")}</select><label>Mobile Money number</label><input id="poP" type="tel" value="${E(d.number)}"><label>Name registered on the number</label><input id="poA" value="${E(d.name)}"><div class="err" id="er"></div><div class="row"><button class="btn alt" onclick="account()">Back</button><button class="btn" onclick="savePayout()">Save</button></div>`);
+}
+async function savePayout(){
+  if(!PHONE_RE.test($("poP").value.trim()))return invalid("poP","Enter a valid Mobile Money number.");
+  if($("poA").value.trim().length<2)return invalid("poA","Enter the name registered on that number.");
+  const r=await api("/api/payout","POST",{net:$("poN").value,number:$("poP").value,name:$("poA").value});
+  if(r.error)return invalid([],r.error);toast("Payout details saved");account();
+}
+const earnList=()=>M(`<h3>My earnings</h3>${myEarn.items.map(i=>`<div class="line"><div class="g"><b>${E(i.title)}</b><br><span class="m">${E(i.order_no)} · ${new Date(i.created).toLocaleDateString()} · item ${money(i.gross)} − commission ${money(i.commission)}</span></div><div><b>${money(i.net)}</b><br><span class="m">${i.status=="paid"?"Paid ✓":"Waiting"}</span></div></div>`).join("")}<div class="row"><button class="btn" onclick="account()">Back</button></div>`);
+async function adminPay(){
+  const r=await api("/api/admin/payouts");if(r.error)return toast(r.error);
+  M(`<h3>💰 Payouts</h3><p class="m">Commission rate: <b>${r.rate}%</b>${r.rate==0?" (change commissionPercent in config.json)":""}</p><div class="tot"><span>Owed to sellers</span><b>${money(r.totals.owed)}</b></div><div class="tot"><span>Paid to sellers</span><span>${money(r.totals.paid)}</span></div><div class="tot"><span>Your commission</span><span>${money(r.totals.commission)}</span></div><div class="tot"><span>Delivery fees collected</span><span>${money(r.fees)}</span></div>
+  <h3 style="margin-top:14px">Sellers waiting to be paid (${r.sellers.length})</h3>${r.sellers.length?r.sellers.map(s=>`<div class="line"><div class="g"><b>${E(s.name)}</b> · ${money(s.pending)}<br><span class="m">${s.num?E(s.net)+" "+E(s.num)+" ("+E(s.pname)+")":"⚠️ No payout details yet"} · ${s.n} item${s.n==1?"":"s"}</span></div><button class="sm" onclick="payRef(${s.id},${s.pending})">Mark paid</button></div>`).join(""):'<p class="m">Nobody is waiting for a payout.</p>'}
+  <div class="row"><button class="btn alt" onclick="account()">Back</button><a class="btn" href="/api/admin/backup" download style="text-align:center;text-decoration:none">⬇️ Download backup</a></div>`);
+}
+const payRef=(id,amt)=>M(`<h3>Record payout</h3><p class="m">After you send ${money(amt)} to the seller's Mobile Money, enter the transaction ID here.</p><label>Mobile Money transaction ID</label><input id="prf" maxlength="40"><div class="err" id="er"></div><div class="row"><button class="btn alt" onclick="adminPay()">Cancel</button><button class="btn" onclick="savePay(${id})">Mark as paid</button></div>`);
+async function savePay(id){
+  if($("prf").value.trim().length<4)return invalid("prf","Enter the transaction ID (at least 4 characters).");
+  const r=await api("/api/admin/payouts","POST",{seller:id,ref:$("prf").value});if(r.error)return invalid("prf",r.error);toast("Payout recorded");adminPay();
+}
+setCount(0);setInterval(pollInbox,15000);

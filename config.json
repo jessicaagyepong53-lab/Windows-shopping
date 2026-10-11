@@ -1,20 +1,36 @@
 {
-  "adminEmail": "Emmanuelagyepong32@admin.com",
-  "payNumber": "0244000000",
-  "payName": "Your Name",
-  "paystackSecret": "sk_test_xxxxxxxx",
-  "siteUrl": "http://localhost:3000",
+  "adminEmail": "Emmanuelagyepong@admin.com",
+  "company": "DealMart",
+  "supportEmail": "emmanuelagyepong32@gmail.com",
+  "supportWhatsapp": "0509333244",
+  "supportHours": "Monday to Saturday, 8am to 6pm",
+  "siteUrl": "https://localhost:3000",
+
+  "payNumber": "0548185428",
+  "payName": "DealMart",
+  "paystackSecret": "",
+
   "minOrder": 100,
   "codMax": 100,
-  "promoPlans": [
-    { "id": "d3", "days": 3, "price": 20 },
-    { "id": "d7", "days": 7, "price": 40 },
-    { "id": "d14", "days": 14, "price": 70 }
-  ],
+  "commissionPercent": 0,
+  "showSamples": true,
+
   "delivery": {
     "mode": "product",
     "perUnit": false,
     "tiers": [ { "below": 100, "fee": 50 }, { "fee": 100 } ],
     "regionFees": {}
-  }
+  },
+  "deliverySlots": [ "8am – 12pm", "12pm – 4pm", "4pm – 8pm" ],
+  "deliveryDays": 7,
+  "noDeliveryWeekdays": [],
+
+  "promoPlans": [
+    { "id": "d3", "days": 3, "price": 20 },
+    { "id": "d7", "days": 7, "price": 40 },
+    { "id": "d14", "days": 14, "price": 70 }
+  ],
+
+  "smtp": { "host": "smtp.example.com", "port": 587, "secure": false, "auth": { "user": "", "pass": "" } },
+  "mailFrom": "DealMart <no-reply@example.com>"
 }

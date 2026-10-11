@@ -1,11 +1,18 @@
 "use strict";
 const express=require("express"),Database=require("better-sqlite3"),bcrypt=require("bcryptjs"),crypto=require("crypto"),fs=require("fs"),path=require("path");
-let CFG={};try{CFG=JSON.parse(fs.readFileSync(path.join(__dirname,"config.json"),"utf8"))}catch{}
+let CFG={};
+for(const f of ["config.json","config.local.json"])try{CFG={...CFG,...JSON.parse(fs.readFileSync(path.join(__dirname,f),"utf8"))}}catch(e){if(e.code!=="ENOENT")console.log(`⚠️  ${f} has a mistake, so it was IGNORED: `+e.message)}
 const PORT=process.env.PORT||3000,FEE=25,DAY=864e5;
 const MIN_ORDER=CFG.minOrder??100,COD_MAX=CFG.codMax??100; // checkout rules (GH₵, items only, delivery fee not counted)
 const ADMIN_EMAIL=String(process.env.ADMIN_EMAIL||CFG.adminEmail||"").trim().toLowerCase();
 const PLANS=CFG.promoPlans||[{id:"d3",days:3,price:20},{id:"d7",days:7,price:40},{id:"d14",days:14,price:70}];
 const PAY=process.env.PAY_NUMBER||CFG.payNumber||"",PAYNAME=CFG.payName||"";
+const COMPANY=CFG.company||"DealMart",SUPPORT_EMAIL=process.env.SUPPORT_EMAIL||CFG.supportEmail||"",SUPPORT_WA=process.env.SUPPORT_WHATSAPP||CFG.supportWhatsapp||"",SUPPORT_HOURS=CFG.supportHours||"Monday to Saturday, 8am to 6pm";
+const COMM=Math.max(0,Math.min(50,Number(CFG.commissionPercent??0)||0)); // % of the item price kept by DealMart
+const PROD=process.env.NODE_ENV=="production",MIN_PW=8;
+const isValidEmail=s=>/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(s||"").trim());
+const RATE_LIMIT=Number(process.env.RATE_LIMIT||CFG.rateLimit||60); // sign-in type requests per 15 minutes per internet address (many people share one address on mobile networks)
+const SHOW_SAMPLES=CFG.showSamples!==false; // set "showSamples": false in config.json to hide the demo ads
 const isAdmin=u=>!!u&&!!ADMIN_EMAIL&&String(u.email).toLowerCase()===ADMIN_EMAIL;
 // delivery: fee per product by unit price (mode "product") or by order total (mode "order"). Edit in config.json under "delivery".
 const DEL=CFG.delivery||{mode:"product",perUnit:false,tiers:[{below:100,fee:50},{fee:100}],regionFees:{}};
@@ -16,7 +23,7 @@ const ymd=d=>d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+Stri
 const freeDays=()=>{const out=[];for(let i=1;out.length<DAYS_AHEAD&&i<45;i++){const d=new Date();d.setDate(d.getDate()+i);if(!NO_DAYS.includes(d.getDay()))out.push(ymd(d))}return out};
 const LOCS=["Greater Accra","Ashanti","Western","Central","Eastern","Volta","Northern"],KINDS=["Brand new","Used","Refurbished"];
 const PAYS=["Card","Mobile Money","Cash on delivery"];
-const DATA=path.join(__dirname,"data"),UP=path.join(DATA,"uploads");fs.mkdirSync(UP,{recursive:true});
+const DATA=process.env.DATA_DIR||CFG.dataDir||path.join(__dirname,"data"),UP=path.join(DATA,"uploads");fs.mkdirSync(UP,{recursive:true});
 const db=new Database(path.join(DATA,"shop.db"));db.pragma("journal_mode=WAL");db.pragma("foreign_keys=ON");
 db.exec(`
 CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY,name TEXT,phone TEXT,email TEXT UNIQUE,pw TEXT,created INTEGER);
@@ -33,6 +40,9 @@ CREATE TABLE IF NOT EXISTS threads(id INTEGER PRIMARY KEY,ad_id INTEGER,buyer IN
 CREATE TABLE IF NOT EXISTS msgs(id INTEGER PRIMARY KEY,thread INTEGER REFERENCES threads(id) ON DELETE CASCADE,sender INTEGER,kind TEXT,body TEXT,amount REAL,status TEXT,created INTEGER,seen INTEGER DEFAULT 0);
 CREATE TABLE IF NOT EXISTS promos(id INTEGER PRIMARY KEY,ad_id INTEGER,owner INTEGER,days INTEGER,price REAL,status TEXT,ref TEXT,created INTEGER,starts INTEGER,ends INTEGER);
 CREATE TABLE IF NOT EXISTS reports(id INTEGER PRIMARY KEY,ad_id INTEGER,reporter INTEGER,reason TEXT,note TEXT,status TEXT,created INTEGER,UNIQUE(ad_id,reporter));
+CREATE TABLE IF NOT EXISTS resets(user_id INTEGER PRIMARY KEY,hash TEXT,expires INTEGER,tries INTEGER DEFAULT 0);
+CREATE TABLE IF NOT EXISTS earnings(id INTEGER PRIMARY KEY,order_no TEXT,seller INTEGER,ad_id INTEGER,title TEXT,gross REAL,commission REAL,net REAL,status TEXT DEFAULT 'pending',payout_id INTEGER,created INTEGER,UNIQUE(order_no,ad_id));
+CREATE TABLE IF NOT EXISTS payouts(id INTEGER PRIMARY KEY,seller INTEGER,amount REAL,ref TEXT,created INTEGER,by_user INTEGER);
 CREATE TABLE IF NOT EXISTS addresses(id INTEGER PRIMARY KEY,user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,label TEXT,name TEXT,phone TEXT,region TEXT,addr TEXT,gps TEXT);
 CREATE TABLE IF NOT EXISTS codes(user_id INTEGER PRIMARY KEY,hash TEXT,expires INTEGER,phone TEXT);
 `);
@@ -40,6 +50,7 @@ if(!db.prepare("PRAGMA table_info(users)").all().some(c=>c.name=="verified"))db.
 if(!db.prepare("PRAGMA table_info(ads)").all().some(c=>c.name=="attrs"))db.exec("ALTER TABLE ads ADD COLUMN attrs TEXT DEFAULT '{}'");
 if(!db.prepare("PRAGMA table_info(ads)").all().some(c=>c.name=="hidden"))db.exec("ALTER TABLE ads ADD COLUMN hidden INTEGER DEFAULT 0");
 for(const [col,ty] of [["status","TEXT"],["ref","TEXT"],["dname","TEXT"],["dphone","TEXT"],["region","TEXT"],["daddr","TEXT"],["gps","TEXT"],["notes","TEXT"],["dday","TEXT"],["slot","TEXT"],["fee","REAL"],["dstatus","TEXT"]])if(!db.prepare("PRAGMA table_info(orders)").all().some(c=>c.name==col))db.exec(`ALTER TABLE orders ADD COLUMN ${col} ${ty}`);
+for(const [col,ty] of [["agreed","INTEGER"],["payout_net","TEXT"],["payout_num","TEXT"],["payout_name","TEXT"]])if(!db.prepare("PRAGMA table_info(users)").all().some(c=>c.name==col))db.exec(`ALTER TABLE users ADD COLUMN ${col} ${ty}`);
 if(!db.prepare("SELECT 1 FROM ads LIMIT 1").get()){
   const SEED=[["Toyota Highlander 2008",0,"Ashanti",55000,"Used","🚙",1],["Honda Civic 2009, clean",0,"Greater Accra",38000,"Used","🚗"],["Toyota Matrix, foreign used",0,"Greater Accra",42000,"Used","🚘"],["Honda Civic Sport 2018",0,"Ashanti",120000,"Used","🏎️",1],["3 bedroom house to let",1,"Greater Accra",2800,"Used","🏡"],["iPhone 13 128GB",2,"Greater Accra",5200,"Used","📱",1],["Samsung Galaxy Tab A8",2,"Central",1900,"Brand new","📲"],["HP Laptop 15, 8GB RAM",3,"Ashanti",3400,"Refurbished","💻"],["55 inch Smart TV",3,"Greater Accra",3900,"Brand new","📺",1],["Sofa set, 5 seater",4,"Western",2500,"Brand new","🛋️"],["Ankara dress, size M",5,"Volta",180,"Brand new","👗"],["Shea butter gift set",6,"Northern",95,"Brand new","🧴"]];
   const ins=db.prepare("INSERT INTO ads(t,c,l,p,k,e,f,s,created) VALUES(?,?,?,?,?,?,?,1,?)");
@@ -50,6 +61,15 @@ let sampleRow=db.prepare("SELECT id FROM users WHERE email=?").get(SAMPLE_EMAIL)
 if(!sampleRow)sampleRow={id:Number(db.prepare("INSERT INTO users(name,phone,email,pw,created) VALUES(?,?,?,?,?)").run("SampleShop","",SAMPLE_EMAIL,"!"+crypto.randomBytes(16).toString("hex"),Date.now()).lastInsertRowid)};
 const SAMPLE_ID=sampleRow.id;
 db.prepare("UPDATE ads SET owner=? WHERE s=1 AND owner IS NULL").run(SAMPLE_ID);
+// sample ads use real photos when you add them to public/samples/ (1.jpg, 1-2.jpg, 1-3.jpg, 2.jpg ...); see samples/README.txt
+{
+  const pub=path.join(__dirname,"public"),upd=db.prepare("UPDATE ads SET imgs=? WHERE id=?");
+  db.prepare("SELECT id FROM ads WHERE s=1 ORDER BY id").all().forEach((r,i)=>{
+    const found=[];
+    for(const suf of ["","-2","-3"])for(const e of ["jpg","jpeg","png","webp"]){const f=`samples/${i+1}${suf}.${e}`;if(fs.existsSync(path.join(pub,f))){found.push("/"+f);break}}
+    upd.run(JSON.stringify(found),r.id);
+  });
+}
 function autoReply(t,amt){
   if(t.seller!==SAMPLE_ID)return;const now=Date.now();
   if(amt){
@@ -91,11 +111,18 @@ function cleanAttrs(c,at){
   }
   return out;
 }
+let mailer=null;
+if(CFG.smtp||process.env.SMTP_URL){try{mailer=require("nodemailer").createTransport(process.env.SMTP_URL||CFG.smtp)}catch{console.log("Email is configured but the 'nodemailer' package is missing. Run: npm install")}}
+async function mail(to,subject,text){
+  if(!mailer){console.log(`[EMAIL to ${to}] ${subject}\n${text}\n`);return false}
+  try{await mailer.sendMail({from:CFG.mailFrom||process.env.MAIL_FROM||`${COMPANY} <no-reply@localhost>`,to,subject,text});return true}
+  catch(e){console.log("Email failed:",e.message);return false}
+}
 const sha=s=>crypto.createHash("sha256").update(s).digest("hex");
 const cookie=(req,k)=>(req.headers.cookie||"").split(/;\s*/).map(c=>c.split("=")).find(c=>c[0]==k)?.[1];
 const startSession=(res,uid)=>{const t=crypto.randomBytes(32).toString("hex");db.prepare("INSERT INTO sessions VALUES(?,?,?)").run(sha(t),uid,Date.now()+30*DAY);
   res.setHeader("Set-Cookie",`sid=${t}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${30*86400}${process.env.NODE_ENV=="production"?"; Secure":""}`)};
-const hits=new Map(),limit=(req,res,next)=>{const n=(hits.get(req.ip)||[]).filter(t=>t>Date.now()-9e5);if(n.length>=15)return res.status(429).json({error:"Too many attempts. Try again in a few minutes."});n.push(Date.now());hits.set(req.ip,n);next()};
+const hits=new Map(),limit=(req,res,next)=>{const n=(hits.get(req.ip)||[]).filter(t=>t>Date.now()-9e5);if(n.length>=RATE_LIMIT)return res.status(429).json({error:"Too many attempts. Try again in a few minutes."});n.push(Date.now());hits.set(req.ip,n);next()};
 const need=(req,res,next)=>req.user?next():res.status(401).json({error:"Please sign in first."});
 const disp=n=>{const p=String(n||"").trim().split(/\s+/);return p.length>1?p[0]+" "+p[p.length-1][0]+".":p[0]};
 const shape=r=>({id:r.id,t:r.t,c:r.c,l:r.l,p:r.p,k:r.k,d:r.d||"",ph:r.ph,imgs:JSON.parse(r.imgs||"[]"),e:r.e,f:r.f,n:!!r.n,x:!!r.x,s:!!r.s,o:r.owner,sn:r.sn?disp(r.sn):null,sv:!!r.sv,sa:r.sa||0,sc:r.sc||0,ra:r.ra||0,rn:r.rn||0,at:JSON.parse(r.attrs||"{}"),h:!!r.hidden,pm:!!r.pm});
@@ -126,27 +153,41 @@ function clean(b){
 
 const app=express();
 app.disable("x-powered-by");
-app.use((req,res,next)=>{res.setHeader("X-Content-Type-Options","nosniff");res.setHeader("Referrer-Policy","same-origin");next()});
+if(PROD)app.set("trust proxy",1);
+app.use((req,res,next)=>{
+  if(PROD&&req.headers["x-forwarded-proto"]==="http")return res.redirect(301,"https://"+req.headers.host+req.originalUrl);
+  res.setHeader("X-Content-Type-Options","nosniff");res.setHeader("Referrer-Policy","same-origin");res.setHeader("X-Frame-Options","DENY");
+  res.setHeader("Permissions-Policy","camera=(), microphone=(), geolocation=()");
+  res.setHeader("Content-Security-Policy","default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'self'");
+  if(req.secure)res.setHeader("Strict-Transport-Security","max-age=15552000");
+  next();
+});
+app.get("/healthz",(req,res)=>res.json({ok:true}));
 app.use(express.json({limit:"12mb",verify:(req,res,buf)=>{req.raw=buf}}));
 app.use((req,res,next)=>{req.user=null;const t=cookie(req,"sid");
   if(t)req.user=db.prepare("SELECT u.id,u.name,u.phone,u.email,u.verified FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=? AND s.expires>?").get(sha(t),Date.now())||null;next()});
 
 app.post("/api/register",limit,(req,res)=>{
   const b=req.body||{},name=String(b.name||"").trim().slice(0,60),email=String(b.email||"").trim().toLowerCase().slice(0,120),phone=String(b.phone||"").trim().slice(0,20),pw=String(b.password||"");
-  if(!name||!/^\S+@\S+\.\S+$/.test(email)||pw.length<6)return res.status(400).json({error:"Enter a name, a valid email and a password of 6 or more characters."});
+  if(b.agree!==true)return res.status(400).json({error:"Please tick the box to accept the Terms and Privacy Policy."});
+  if(!name||!/^\S+@\S+\.\S+$/.test(email)||pw.length<MIN_PW)return res.status(400).json({error:`Enter a name, a valid email and a password of ${MIN_PW} or more characters.`});
   if(db.prepare("SELECT 1 FROM users WHERE email=?").get(email))return res.status(409).json({error:"That email is already registered."});
-  const id=Number(db.prepare("INSERT INTO users(name,phone,email,pw,created) VALUES(?,?,?,?,?)").run(name,phone,email,bcrypt.hashSync(pw,10),Date.now()).lastInsertRowid);
+  const id=Number(db.prepare("INSERT INTO users(name,phone,email,pw,created,agreed) VALUES(?,?,?,?,?,?)").run(name,phone,email,bcrypt.hashSync(pw,10),Date.now(),Date.now()).lastInsertRowid);
   startSession(res,id);res.json({user:{id,name,phone,email,verified:false,admin:isAdmin({email})}});
 });
+const loginFails=new Map(),forgotHits=new Map();
 app.post("/api/login",limit,(req,res)=>{
-  const b=req.body||{},u=db.prepare("SELECT * FROM users WHERE email=?").get(String(b.email||"").trim().toLowerCase());
-  if(!u||!bcrypt.compareSync(String(b.password||""),u.pw))return res.status(401).json({error:"Wrong email or password."});
+  const b=req.body||{},em=String(b.email||"").trim().toLowerCase(),u=db.prepare("SELECT * FROM users WHERE email=?").get(em);
+  const recent=(loginFails.get(em)||[]).filter(t=>t>Date.now()-9e5);
+  if(recent.length>=8)return res.status(429).json({error:"Too many wrong attempts on this account. Wait 15 minutes, or use Forgot password."});
+  if(!u||!bcrypt.compareSync(String(b.password||""),u.pw)){recent.push(Date.now());loginFails.set(em,recent);return res.status(401).json({error:"Wrong email or password."})}
+  loginFails.delete(em);
   startSession(res,u.id);res.json({user:{id:u.id,name:u.name,phone:u.phone,email:u.email,verified:!!u.verified,admin:isAdmin(u)}});
 });
 app.post("/api/logout",(req,res)=>{const t=cookie(req,"sid");if(t)db.prepare("DELETE FROM sessions WHERE token=?").run(sha(t));res.setHeader("Set-Cookie","sid=; Max-Age=0; Path=/");res.json({ok:true})});
 app.get("/api/me",(req,res)=>res.json({user:req.user&&{...req.user,verified:!!req.user.verified,admin:isAdmin(req.user)}}));
 
-app.get("/api/ads",(req,res)=>res.json({ads:db.prepare(AD_SQL+" WHERE (a.x=0 AND a.hidden=0) OR a.owner=? ORDER BY pm DESC,a.created DESC").all(req.user?.id??-1).map(shape)}));
+app.get("/api/ads",(req,res)=>res.json({ads:db.prepare(AD_SQL+" WHERE (a.x=0 AND a.hidden=0"+(SHOW_SAMPLES?"":" AND a.s=0")+") OR a.owner=? ORDER BY pm DESC,a.created DESC").all(req.user?.id??-1).map(shape)}));
 app.post("/api/ads",need,(req,res)=>{
   const d=clean(req.body||{});if(typeof d=="string")return res.status(400).json({error:d});
   const imgs=saveImgs(req.body.imgs,[]);
@@ -344,9 +385,9 @@ app.post("/api/admin/reports/:id",need,adm,(req,res)=>{
 app.post("/api/pay/verify",need,async(req,res)=>{
   const o=db.prepare("SELECT * FROM orders WHERE ref=? AND user_id=?").get(String((req.body||{}).reference||""),req.user.id);
   if(!o)return res.status(404).json({error:"We could not find that payment."});
-  if(o.status!=="awaiting_payment")return res.json({paid:o.status=="paid",no:o.no,total:o.total,dday:o.dday,slot:o.slot});
+  if(o.status!=="awaiting_payment")return res.json({paid:o.status=="paid",no:o.no,total:o.total,dday:o.dday,slot:o.slot,ids:JSON.parse(o.items).map(i=>i.id)});
   const j=await ps("GET","/transaction/verify/"+encodeURIComponent(o.ref));
-  if(j.status&&paidOk(o,j.data)){markPaid(o);return res.json({paid:true,no:o.no,total:o.total,dday:o.dday,slot:o.slot})}
+  if(j.status&&paidOk(o,j.data)){markPaid(o);return res.json({paid:true,no:o.no,total:o.total,dday:o.dday,slot:o.slot,ids:JSON.parse(o.items).map(i=>i.id)})}
   res.json({paid:false});
 });
 app.post("/api/paystack/webhook",(req,res)=>{
@@ -380,17 +421,123 @@ app.put("/api/orders/:no/delivery",need,(req,res)=>{
   res.json({ok:true});
 });
 const FLOW=["placed","confirmed","out","delivered"];
+function createEarnings(o){
+  const ins=db.prepare("INSERT OR IGNORE INTO earnings(order_no,seller,ad_id,title,gross,commission,net,created) VALUES(?,?,?,?,?,?,?,?)");
+  for(const it of JSON.parse(o.items)){
+    if(!it.o||it.o===SAMPLE_ID)continue;
+    const gross=Math.round(it.p*it.q*100)/100,com=Math.round(gross*COMM)/100;
+    ins.run(o.no,it.o,it.id,it.t,gross,com,Math.round((gross-com)*100)/100,Date.now());
+  }
+}
 app.get("/api/admin/orders",need,adm,(req,res)=>res.json({orders:db.prepare("SELECT o.*,u.name uname FROM orders o LEFT JOIN users u ON u.id=o.user_id WHERE (o.status IS NULL OR o.status!='awaiting_payment') AND (o.dstatus IS NULL OR o.dstatus!='delivered') ORDER BY o.dday IS NULL,o.dday,o.slot,o.id").all().map(o=>({no:o.no,uname:o.uname,items:JSON.parse(o.items),total:o.total,pay:o.pay,status:o.status,dstatus:o.dstatus||"placed",dday:o.dday,slot:o.slot,dname:o.dname,dphone:o.dphone,region:o.region,daddr:o.daddr,gps:o.gps,notes:o.notes}))}));
 app.post("/api/admin/orders/:no/advance",need,adm,(req,res)=>{
   const o=db.prepare("SELECT * FROM orders WHERE no=?").get(String(req.params.no));if(!o||o.status=="awaiting_payment")return res.status(404).json({error:"Order not found."});
   const next=FLOW[Math.min(FLOW.indexOf(o.dstatus||"placed")+1,3)];
   db.prepare("UPDATE orders SET dstatus=?"+(next=="delivered"&&o.status=="placed"?",status='paid'":"")+" WHERE id=?").run(next,o.id);
+  if(next=="delivered")createEarnings(o);
   res.json({ok:true,dstatus:next});
+});
+const BK=path.join(DATA,"backups");fs.mkdirSync(BK,{recursive:true});
+async function snapshot(){
+  const f=path.join(BK,"shop-"+new Date().toISOString().slice(0,10)+".db");
+  if(fs.existsSync(f))return f;
+  await db.backup(f);
+  const all=fs.readdirSync(BK).filter(n=>/^shop-.*\.db$/.test(n)).sort();
+  for(const n of all.slice(0,Math.max(0,all.length-14)))fs.unlinkSync(path.join(BK,n));
+  return f;
+}
+function tarEntry(name,buf){
+  const h=Buffer.alloc(512);h.write(name,0,100);h.write("0000644\0",100);h.write("0000000\0",108);h.write("0000000\0",116);
+  h.write(buf.length.toString(8).padStart(11,"0")+"\0",124);h.write(Math.floor(Date.now()/1000).toString(8).padStart(11,"0")+"\0",136);
+  h.write("        ",148);h.write("0",156);h.write("ustar\0",257);h.write("00",263);
+  let sum=0;for(const b of h)sum+=b;h.write(sum.toString(8).padStart(6,"0")+"\0 ",148);
+  return Buffer.concat([h,buf,Buffer.alloc((512-buf.length%512)%512)]);
+}
+async function backupArchive(){
+  const tmp=path.join(BK,"tmp-"+Date.now()+".db");await db.backup(tmp);
+  const parts=[tarEntry("shop.db",fs.readFileSync(tmp))];fs.unlinkSync(tmp);
+  for(const n of fs.readdirSync(UP)){const p=path.join(UP,n);if(fs.statSync(p).isFile())parts.push(tarEntry("uploads/"+n,fs.readFileSync(p)))}
+  parts.push(Buffer.alloc(1024));return require("zlib").gzipSync(Buffer.concat(parts));
+}
+app.get("/api/admin/backup",need,adm,async(req,res)=>{
+  const buf=await backupArchive();
+  res.setHeader("Content-Type","application/gzip");res.setHeader("Content-Disposition",`attachment; filename="${COMPANY.toLowerCase().replace(/\W+/g,"-")}-backup-${new Date().toISOString().slice(0,10)}.tar.gz"`);res.send(buf);
+});
+// ---- forgot / change password ----
+app.post("/api/forgot",limit,async(req,res)=>{
+  const email=String((req.body||{}).email||"").trim().toLowerCase(),u=db.prepare("SELECT id,name,email FROM users WHERE email=? AND pw NOT LIKE '!%'").get(email);
+  const sent=(forgotHits.get(email)||[]).filter(t=>t>Date.now()-36e5);
+  if(u&&sent.length<5){
+    sent.push(Date.now());forgotHits.set(email,sent);
+    const code=String(crypto.randomInt(100000,1000000));
+    db.prepare("INSERT OR REPLACE INTO resets VALUES(?,?,?,0)").run(u.id,sha(code),Date.now()+15*60000);
+    await mail(u.email,`Your ${COMPANY} password reset code`,`Hi ${u.name.split(" ")[0]},\n\nYour ${COMPANY} password reset code is ${code}. It expires in 15 minutes.\n\nIf you did not ask for this, you can ignore this email.`);
+  }
+  res.json({ok:true});
+});
+app.post("/api/reset",limit,(req,res)=>{
+  const b=req.body||{},u=db.prepare("SELECT * FROM users WHERE email=?").get(String(b.email||"").trim().toLowerCase()),pw=String(b.password||"");
+  const bad=()=>res.status(400).json({error:"That code is wrong or has expired. Request a new one."});
+  if(pw.length<MIN_PW)return res.status(400).json({error:`Choose a password of ${MIN_PW} or more characters.`});
+  const r=u&&db.prepare("SELECT * FROM resets WHERE user_id=?").get(u.id);
+  if(!r||r.expires<Date.now()||r.tries>=5)return bad();
+  if(r.hash!==sha(String(b.code||"").trim())){db.prepare("UPDATE resets SET tries=tries+1 WHERE user_id=?").run(u.id);return bad()}
+  db.prepare("UPDATE users SET pw=? WHERE id=?").run(bcrypt.hashSync(pw,10),u.id);
+  db.prepare("DELETE FROM resets WHERE user_id=?").run(u.id);db.prepare("DELETE FROM sessions WHERE user_id=?").run(u.id);
+  startSession(res,u.id);res.json({user:{id:u.id,name:u.name,phone:u.phone,email:u.email,verified:!!u.verified,admin:isAdmin(u)}});
+});
+app.post("/api/password",need,limit,(req,res)=>{
+  const b=req.body||{},u=db.prepare("SELECT * FROM users WHERE id=?").get(req.user.id),np=String(b.password||"");
+  if(!bcrypt.compareSync(String(b.current||""),u.pw))return res.status(400).json({error:"Your current password is wrong."});
+  if(np.length<MIN_PW)return res.status(400).json({error:`Choose a password of ${MIN_PW} or more characters.`});
+  db.prepare("UPDATE users SET pw=? WHERE id=?").run(bcrypt.hashSync(np,10),u.id);
+  db.prepare("DELETE FROM sessions WHERE user_id=? AND token!=?").run(u.id,sha(cookie(req,"sid")));
+  res.json({ok:true});
+});
+// ---- support details and legal pages ----
+app.get("/api/site",(req,res)=>res.json({whatsapp:SUPPORT_WA,email:SUPPORT_EMAIL,company:COMPANY}));
+const fill=(h,req)=>h.replaceAll("%SITE%",SITE(req)).replaceAll("%COMPANY%",COMPANY).replaceAll("%EMAIL%",SUPPORT_EMAIL||"(support email not set yet)").replaceAll("%WHATSAPP%",SUPPORT_WA||"(WhatsApp number not set yet)").replaceAll("%HOURS%",SUPPORT_HOURS).replaceAll("%MIN_ORDER%",String(MIN_ORDER)).replaceAll("%COD_MAX%",String(COD_MAX)).replaceAll("%COMMISSION%",String(COMM));
+for(const p of ["terms","privacy","contact","faq"])app.get(["/"+p,"/"+p+".html"],(req,res)=>res.type("html").send(fill(fs.readFileSync(path.join(__dirname,"public",p+".html"),"utf8"),req)));
+// ---- seller earnings and payouts ----
+const NETS=["MTN","Telecel","AirtelTigo"];
+app.get("/api/payout",need,(req,res)=>{
+  const u=db.prepare("SELECT payout_net n,payout_num p,payout_name a FROM users WHERE id=?").get(req.user.id);
+  const sum=db.prepare("SELECT COALESCE(SUM(CASE WHEN status='pending' THEN net END),0) pending,COALESCE(SUM(CASE WHEN status='paid' THEN net END),0) paid FROM earnings WHERE seller=?").get(req.user.id);
+  res.json({details:{net:u.n||"",number:u.p||"",name:u.a||""},pending:sum.pending,paid:sum.paid,rate:COMM,items:db.prepare("SELECT order_no,title,gross,commission,net,status,created FROM earnings WHERE seller=? ORDER BY id DESC LIMIT 20").all(req.user.id)});
+});
+app.post("/api/payout",need,(req,res)=>{
+  const b=req.body||{},net=String(b.net||""),num=String(b.number||"").trim(),nm=String(b.name||"").trim().slice(0,60);
+  if(!NETS.includes(net))return res.status(400).json({error:"Choose your Mobile Money network."});
+  if(!/^[0-9+\s]{9,15}$/.test(num))return res.status(400).json({error:"Enter a valid Mobile Money number."});
+  if(nm.length<2)return res.status(400).json({error:"Enter the name registered on that number."});
+  db.prepare("UPDATE users SET payout_net=?,payout_num=?,payout_name=? WHERE id=?").run(net,num,nm,req.user.id);res.json({ok:true});
+});
+app.get("/api/admin/payouts",need,adm,(req,res)=>res.json({
+  rate:COMM,
+  sellers:db.prepare("SELECT u.id,u.name,u.payout_net net,u.payout_num num,u.payout_name pname,SUM(e.net) pending,COUNT(*) n FROM earnings e JOIN users u ON u.id=e.seller WHERE e.status='pending' GROUP BY u.id ORDER BY pending DESC").all(),
+  totals:db.prepare("SELECT COALESCE(SUM(commission),0) commission,COALESCE(SUM(CASE WHEN status='pending' THEN net END),0) owed,COALESCE(SUM(CASE WHEN status='paid' THEN net END),0) paid FROM earnings").get(),
+  fees:db.prepare("SELECT COALESCE(SUM(fee),0) v FROM orders WHERE dstatus='delivered'").get().v}));
+app.post("/api/admin/payouts",need,adm,(req,res)=>{
+  const b=req.body||{},sid=+b.seller,ref=String(b.ref||"").trim().slice(0,40);
+  if(ref.length<4)return res.status(400).json({error:"Enter the Mobile Money transaction ID you paid with."});
+  const rows=db.prepare("SELECT id,net FROM earnings WHERE seller=? AND status='pending'").all(sid);
+  if(!rows.length)return res.status(400).json({error:"Nothing is waiting for this seller."});
+  const amount=Math.round(rows.reduce((n,r)=>n+r.net,0)*100)/100;
+  const pid=Number(db.prepare("INSERT INTO payouts(seller,amount,ref,created,by_user) VALUES(?,?,?,?,?)").run(sid,amount,ref,Date.now(),req.user.id).lastInsertRowid);
+  db.prepare("UPDATE earnings SET status='paid',payout_id=? WHERE seller=? AND status='pending'").run(pid,sid);
+  res.json({ok:true,amount});
 });
 app.use("/uploads",express.static(UP,{maxAge:"7d"}));
 app.get(["/","/index.html"],(req,res)=>res.type("html").send(fs.readFileSync(path.join(__dirname,"public","index.html"),"utf8").replaceAll("%SITE%",SITE(req))));
 app.use(express.static(path.join(__dirname,"public")));
 app.use("/api",(req,res)=>res.status(404).json({error:"Not found."}));
 app.use((err,req,res,next)=>res.status(err.status||500).json({error:err.type=="entity.too.large"?"Photos are too large. Use fewer or smaller photos.":"Something went wrong. Please try again."}));
-setInterval(()=>{db.prepare("DELETE FROM sessions WHERE expires<?").run(Date.now());db.prepare("DELETE FROM orders WHERE status='awaiting_payment' AND created<?").run(Date.now()-DAY)},36e5).unref();
-app.listen(PORT,()=>console.log(`DealMart running at http://localhost:${PORT}`));
+setInterval(()=>{snapshot().catch(()=>{});db.prepare("DELETE FROM sessions WHERE expires<?").run(Date.now());db.prepare("DELETE FROM orders WHERE status='awaiting_payment' AND created<?").run(Date.now()-DAY)},36e5).unref();
+app.listen(PORT,()=>{
+  console.log(`DealMart running at http://localhost:${PORT}`);
+  snapshot().then(f=>console.log("Daily backup: "+path.basename(f))).catch(e=>console.log("Backup failed:",e.message));
+  console.log(mailer?"Email: on":"Email: not set up (password reset codes are printed in this window instead)");
+  console.log(`Commission: ${COMM}%`+(SUPPORT_WA?"":" | Support WhatsApp not set"));
+  console.log(ADMIN_EMAIL?`Admin account: ${ADMIN_EMAIL} (sign in with this email to see the admin buttons)`:"No admin set. Add \"adminEmail\" to config.json to turn on the admin buttons.");
+  console.log(PS_SECRET?"Paystack: on":"Paystack: not set up (card and Mobile Money are switched off)");
+});
