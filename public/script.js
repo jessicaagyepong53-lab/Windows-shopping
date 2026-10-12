@@ -43,7 +43,7 @@ function invalid(ids,msg,err="er"){
 }
 const PHONE_RE=/^[0-9+\s]{9,15}$/;
 const M=h=>{$("mb").innerHTML=h;$("m").classList.add("open");const f=$("mb").querySelector("input:not([type=file]),select,textarea");if(f)setTimeout(()=>f.focus(),60)};
-const X=()=>{$("m").classList.remove("open");clearInterval(chatTimer);afterAuth=null};
+const X=()=>{$("m").classList.remove("open");clearInterval(chatTimer);afterAuth=null;if(/^\/ad\//.test(location.pathname))history.replaceState(null,"","/")};
 $("m").addEventListener("click",e=>{if(e.target.id=="m")X()});
 document.addEventListener("keydown",e=>{if(e.key=="Escape")X()});
 
@@ -57,7 +57,7 @@ function badges(){
 function filtered(){
   const q=$("q").value.toLowerCase().trim(),l=$("loc").value,k=$("fk").value,so=$("so").value;
   const mn=+$("mn").value||0,mx=+$("mx").value||Infinity;
-  const r=ads.filter(a=>!a.x&&!a.h&&(!st.wl||wish.includes(a.id))&&(st.cat<0||a.c==st.cat)&&(l=="All Ghana"||a.l==l)&&(k=="Any condition"||a.k==k)&&a.p>=mn&&a.p<=mx&&attrOk(a)&&(!q||(a.t+" "+(a.d||"")+" "+Object.values(a.at||{}).join(" ")).toLowerCase().includes(q)));
+  const r=ads.filter(a=>!a.x&&!a.h&&(!st.wl||wish.includes(a.id))&&(st.cat<0||a.c==st.cat)&&(l=="All Ghana"||a.l==l)&&(k=="Any condition"||a.k==k)&&a.p>=mn&&a.p<=mx&&attrOk(a)&&(!q||q.split(/\s+/).every(w=>(a.t+" "+(a.d||"")+" "+Object.values(a.at||{}).join(" ")+" "+(CATS[a.c]?CATS[a.c][0]:"")+" "+a.l).toLowerCase().includes(w))));
   if(so=="low")r.sort((a,b)=>a.p-b.p);
   if(so=="high")r.sort((a,b)=>b.p-a.p);
   const nf=st.afc==st.cat?Object.keys(st.af).length:0;$("xc").textContent=nf?"("+nf+")":"";
@@ -94,13 +94,14 @@ function add(id,d=1,quiet=false){
 function view(id){
   const a=ads.find(x=>x.id==id);if(!a)return;
   const im=a.imgs||[];
+  history.replaceState(null,"","/ad/"+a.id);if(!view.seen)view.seen=new Set();if(!view.seen.has(a.id)){view.seen.add(a.id);api("/api/ads/"+a.id+"/view","POST")}
   const wa=a.ph?`https://wa.me/${a.ph.replace(/\D/g,"").replace(/^0/,"233")}?text=${encodeURIComponent("Hi, is '"+a.t+"' still available?")}`:"";
   M(`${galHtml(a)}
   
   <div class="price" style="font-size:22px;margin-top:10px">${money(a.p)}${a.n?' <span class="m">· Negotiable</span>':""}</div>
   <h3>${E(a.t)}</h3><div class="m">${E(CATS[a.c][0])} · ${E(a.l)} · ${E(a.k)}</div>${a.o&&a.sn?`<button class="slr" onclick="seller(${a.o})"><span class="av">${E(a.sn[0])}</span><span style="flex:1"><b>${E(a.sn)}</b> ${a.sv?'<span class="vb">✔ Verified</span>':""}<br><span class="m">${stars(a.sa,a.sc)}</span></span><span class="ch">›</span></button>`:""}
   ${specs(a)}<button class="link" onclick="reviews(${a.id})">${a.rn?stars(a.ra,a.rn):"No reviews yet"} · Reviews</button><p>${E(a.d||"No description provided.")}</p>
-  <div class="row"><button class="btn alt" onclick="fav(${a.id});view(${a.id})">${wish.includes(a.id)?"♥ Saved":"♡ Save"}</button><button class="btn" onclick="add(${a.id})">Add to cart</button></div>
+  <div class="row"><button class="btn alt" onclick="share(${a.id})">🔗 Share</button><button class="btn alt" onclick="fav(${a.id});view(${a.id})">${wish.includes(a.id)?"♥ Saved":"♡ Save"}</button><button class="btn" onclick="add(${a.id})">Add to cart</button></div>
   ${a.o&&!(user&&a.o===user.id)?`<div class="row"><button class="btn alt" onclick="chat(${a.id})">💬 Message seller</button><button class="btn alt" onclick="chat(${a.id},1)">🏷️ Make an offer</button></div><button class="link" style="margin:6px 0" onclick="reportAd(${a.id})">🚩 Report this ad</button>`:""}<div class="row">${wa?`<a class="btn alt" target="_blank" rel="noopener" href="${wa}">Chat on WhatsApp</a>`:`<button class="btn alt" onclick="toast('This is a sample listing')">Contact seller</button>`}${user&&a.o===user.id?`<button class="btn alt" onclick="promote(${a.id})">⭐ Promote</button><button class="btn alt" onclick="sell(${a.id})">Edit</button><button class="btn alt" onclick="del(${a.id})">Delete</button>`:""}</div>`);
 }
 function del(id){ask("Delete this ad?","This cannot be undone.","Delete",async()=>{const r=await api("/api/ads/"+id,"DELETE");if(r.error)return toast(r.error);ads=ads.filter(a=>a.id!=id);delete cart[id];S("ws_cart",cart);draw();toast("Ad deleted")})}
@@ -210,10 +211,10 @@ function login(u){const f=afterAuth;user=u;X();badges();draw();loadDeals();pollI
 function logout(){api("/api/logout","POST");user=null;deals={};setCount(0);X();badges();draw();toast("Signed out")}
 async function account(){
   if(!user)return auth("login");
-  const mine=myOrders=(await api("/api/orders")).orders||[];myPromos=(await api("/api/promos/mine")).promos||{};myEarn=await api("/api/payout");
-  M(`<h3>${E(user.name)}</h3><div class="m">${E(user.email)}</div><div style="margin-top:8px">${user.verified?'<span class="vb">✔ Verified phone</span>':'<button class="sm" onclick="verifyPhone()">Verify my phone</button>'} <button class="link" style="margin-left:8px" onclick="seller(${user.id})">View my public profile</button> <button class="link" style="margin-left:8px" onclick="changePw()">Change password</button></div>${user.admin?'<div class="row" style="margin-top:12px"><button class="btn" onclick="adminQ()">🛡️ Admin queue</button><button class="btn alt" onclick="adminOrders()">🚚 Deliveries</button><button class="btn alt" onclick="adminPay()">💰 Payouts</button></div>':""}<h3 style="margin-top:16px">My orders</h3>
+  const mine=myOrders=(await api("/api/orders")).orders||[];myPromos=(await api("/api/promos/mine")).promos||{};myEarn=await api("/api/payout");const ps=await pushState().catch(()=>"unsupported");
+  M(`<h3>${E(user.name)}</h3><div class="m">${E(user.email)}</div><div style="margin-top:8px">${user.verified?'<span class="vb">✔ Verified phone</span>':'<button class="sm" onclick="verifyPhone()">Verify my phone</button>'} <button class="link" style="margin-left:8px" onclick="seller(${user.id})">View my public profile</button> <button class="link" style="margin-left:8px" onclick="changePw()">Change password</button></div>${user.admin?'<div class="row" style="margin-top:12px"><button class="btn" onclick="adminQ()">🛡️ Admin queue</button><button class="btn alt" onclick="adminOrders()">🚚 Deliveries</button><button class="btn alt" onclick="adminPay()">💰 Payouts</button><button class="btn alt" onclick="adminDisp()">⚖️ Disputes</button></div>':""}<h3 style="margin-top:16px">My orders</h3>
   ${mine.length?mine.map(o=>`<div class="line" style="cursor:pointer" onclick="orderView('${E(o.no)}')"><div class="g"><b>${E(o.no)}</b> · ${new Date(o.created).toLocaleDateString()} <span class="vb">${E(D_LBL[o.dstatus]||"Order placed")}</span><br><span class="m">${o.items.map(i=>E(i.t)+" x"+i.q).join(", ")}${o.dday?"<br>🚚 "+fmtDay(o.dday)+", "+E(o.slot):""}</span></div><b>${money(o.total)}</b></div>`).join(""):'<p class="m">No orders yet.</p>'}
-  <h3 style="margin-top:16px">My ads</h3>${myAds()}${earnSection()}<div class="row"><button class="btn alt" onclick="logout()">Sign out</button></div>`);
+  <h3 style="margin-top:16px">My ads</h3>${myAds()}${earnSection()}${appSection(ps)}<div class="row"><button class="btn alt" onclick="logout()">Sign out</button></div>`);
 }
 
 let editId=null;
@@ -336,7 +337,7 @@ $("wishB").onclick=()=>{st.wl=!st.wl;st.n=8;draw()};
 badges();
 (async()=>{const f=await api("/api/fields");if(f.fields)FLD=f.fields;if(f.rules)RULES=f.rules;
   const si=await api("/api/site");if(si.whatsapp){$("wa").href="https://wa.me/"+si.whatsapp.replace(/\D/g,"").replace(/^0/,"233")+"?text="+encodeURIComponent("Hi DealMart, I need help");$("wa").hidden=false}const m=await api("/api/me");if(m.user){user=m.user;loadDeals();pollInbox()}badges();
-  const rf=new URLSearchParams(location.search).get("reference");if(rf){history.replaceState(null,"",location.pathname);if(user)verifyReturn(rf);else toast("Sign in to confirm your payment")}const r=await api("/api/ads");if(r.error)toast(r.error);else ads=r.ads;draw()})();
+  const rf=new URLSearchParams(location.search).get("reference");if(rf){history.replaceState(null,"",location.pathname);if(user)verifyReturn(rf);else toast("Sign in to confirm your payment")}const r=await api("/api/ads");if(r.error)toast(r.error);else ads=r.ads;draw();const dl=/^\/ad\/(\d+)/.exec(location.pathname);if(dl){if(ads.some(a=>a.id==dl[1]))view(+dl[1]);else{history.replaceState(null,"","/");toast("That ad is no longer available")}}})();
 
 /* ---- category fields ---- */
 function fields(){
@@ -450,7 +451,7 @@ async function verifyReturn(ref){
 
 /* ================= CHECKOUT ================= */
 let CO={},myOrders=[];
-const D_LBL={placed:"Order placed",confirmed:"Confirmed",out:"Out for delivery",delivered:"Delivered"};
+const D_LBL={placed:"Order placed",confirmed:"Confirmed",out:"Out for delivery",delivered:"Delivered",cancelled:"Cancelled"};
 const fmtDay=d=>new Date(d+"T12:00:00").toLocaleDateString(undefined,{weekday:"short",day:"numeric",month:"short"});
 const tierFee=(D,x)=>{for(const t of D.tiers)if(t.below==null||x<t.below)return t.fee;return 0};
 const calcFee=(D,rows,reg)=>(D.mode=="order"?tierFee(D,rows.reduce((n,r)=>n+dp(r.a)*r.q,0)):rows.reduce((n,r)=>n+tierFee(D,dp(r.a))*(D.perUnit?r.q:1),0))+((D.regionFees||{})[reg]||0);
@@ -565,12 +566,15 @@ async function coPlace(){
 /* ---- order tracking and editing ---- */
 function orderView(no){
   const o=myOrders.find(x=>x.no==no);if(!o)return;
-  const steps=["placed","confirmed","out","delivered"],at=steps.indexOf(o.dstatus||"placed"),edit=o.dday&&at<2;
-  M(`<h3>Order ${E(o.no)}</h3><div class="tl">${steps.map((s,i)=>`<div class="${i<=at?"dn":""}"><i>${i<=at?"✓":""}</i>${D_LBL[s]}</div>`).join("")}</div>
+  const steps=["placed","confirmed","out","delivered"],at=steps.indexOf(o.dstatus||"placed"),edit=o.dday&&at>=0&&at<2,canc=o.dstatus=="cancelled",canCancel=at>=0&&at<2&&(!o.cancelBy||Date.now()<o.cancelBy),
+    cutNote=at>=0&&at<2&&o.cancelBy?(Date.now()<o.cancelBy?`<p class="m">You can cancel this order until ${new Date(o.cancelBy).toLocaleString([],{weekday:"short",day:"numeric",month:"short",hour:"numeric",minute:"2-digit"})}.</p>`:`<p class="m">The cancellation window has closed. Orders can be cancelled up to ${o.cancelHours} hours before delivery.</p>`):"",canReport=o.dstatus=="delivered"&&!o.dispute&&(!o.delivered||Date.now()-o.delivered<48*36e5),
+    banner=canc?`<div class="promise">❌ This order was cancelled.${o.refund=="pending"?" Your refund is being processed.":o.refund=="refunded"?" Your refund has been sent.":""}</div>`:"",
+    dnote=o.dispute?`<p class="m">Problem reported: ${E(o.dispute.reason)} · ${o.dispute.status=="open"?"we are looking into it":o.dispute.status=="refunded"?"refund approved":"closed, no refund"}${o.dispute.resolution?"<br>"+E(o.dispute.resolution):""}${o.dispute.status=="refunded"&&o.refund=="refunded"?"<br>Refund sent.":""}</p>`:"";
+  M(`<h3>Order ${E(o.no)}</h3>${banner}<div class="tl"${canc?' style="display:none"':""}>${steps.map((s,i)=>`<div class="${i<=at?"dn":""}"><i>${i<=at?"✓":""}</i>${D_LBL[s]}</div>`).join("")}</div>
   ${o.dday?`<div class="promise">🚚 <b>${fmtDay(o.dday)}</b>, ${E(o.slot)}<br><span class="m">${E(o.dname)} · ${E(o.dphone)}<br>${E(o.daddr)}, ${E(o.region)}${o.gps?" · "+E(o.gps):""}${o.notes?"<br>Note: "+E(o.notes):""}</span></div>`:'<p class="m">Delivery details were not recorded for this older order.</p>'}
   <h3 style="margin-top:14px">Items</h3>${o.items.map(i=>`<div class="line"><div class="g">${E(i.t)}<br><span class="m">${money(i.p)} × ${i.q}</span></div><b>${money(i.p*i.q)}</b></div>`).join("")}
   <div class="tot"><span>Delivery</span><span>${money(o.fee||0)}</span></div><div class="tot"><b>Total</b><b>${money(o.total)}</b></div><p class="m">Payment: ${E(o.pay)}${o.status=="paid"?" · paid ✓":""}</p>
-  <div class="row"><button class="btn alt" onclick="account()">Back</button>${edit?`<button class="btn" onclick="editDelivery('${E(o.no)}')">Change delivery</button>`:""}</div>`);
+  <div class="row"><button class="btn alt" onclick="account()">Back</button>${edit?`<button class="btn" onclick="editDelivery('${E(o.no)}')">Change delivery</button>`:""}${canCancel?`<button class="btn alt" onclick="cancelOrder('${E(o.no)}')">Cancel order</button>`:""}${canReport?`<button class="btn alt" onclick="reportProblem('${E(o.no)}')">Report a problem</button>`:""}</div>${cutNote}${dnote}`);
 }
 async function editDelivery(no){
   const o=myOrders.find(x=>x.no==no),i=await api("/api/delivery");if(i.error)return toast(i.error);
@@ -646,7 +650,7 @@ async function doChangePw(){
 /* ---- seller earnings and admin payouts ---- */
 const earnSection=()=>{
   const e=myEarn;if(!e||e.error||!(e.items.length||e.details.number||ads.some(a=>a.o===user.id)))return"";
-  return `<h3 style="margin-top:16px">💰 My earnings</h3><div class="tot"><span>Waiting to be paid out</span><b>${money(e.pending)}</b></div><div class="tot"><span>Paid out so far</span><span>${money(e.paid)}</span></div><p class="m" style="font-size:12px">You earn the item price minus DealMart's ${e.rate}% commission once an order is delivered. Delivery fees are not part of your earnings.</p>${e.details.number?`<p class="m" style="font-size:12px">Paying to ${E(e.details.net)} ${E(e.details.number)} (${E(e.details.name)})</p>`:'<p class="err">Add your Mobile Money details so we can pay you.</p>'}<div class="row"><button class="btn alt" onclick="payoutForm()">${e.details.number?"Edit":"Add"} payout details</button>${e.items.length?'<button class="btn alt" onclick="earnList()">See earnings</button>':""}</div>`;
+  return `<h3 style="margin-top:16px">💰 My earnings</h3><div class="tot"><span>Waiting to be paid out</span><b>${money(e.pending)}</b></div><div class="tot"><span>Paid out so far</span><span>${money(e.paid)}</span></div><p class="m" style="font-size:12px">You earn the item price minus DealMart's ${e.rate}% commission once an order is delivered. Delivery fees are not part of your earnings.</p>${e.details.number?`<p class="m" style="font-size:12px">Paying to ${E(e.details.net)} ${E(e.details.number)} (${E(e.details.name)})</p>`:'<p class="err">Add your Mobile Money details so we can pay you.</p>'}<div class="row"><button class="btn alt" onclick="dash()">📊 Dashboard</button><button class="btn alt" onclick="payoutForm()">${e.details.number?"Edit":"Add"} payout details</button>${e.items.length?'<button class="btn alt" onclick="earnList()">See earnings</button>':""}</div>`;
 };
 function payoutForm(){
   const d=myEarn.details||{};
@@ -671,3 +675,125 @@ async function savePay(id){
   const r=await api("/api/admin/payouts","POST",{seller:id,ref:$("prf").value});if(r.error)return invalid("prf",r.error);toast("Payout recorded");adminPay();
 }
 setCount(0);setInterval(pollInbox,15000);
+
+/* ---- share an ad ---- */
+async function share(id){
+  const a=ads.find(x=>x.id==id);if(!a)return;
+  const url=location.origin+"/ad/"+a.id,text=a.t+" – "+money(a.p)+" on DealMart";
+  if(navigator.share){try{await navigator.share({title:a.t,text,url})}catch{}return}
+  let ok=false;try{await navigator.clipboard.writeText(url);ok=true}catch{}
+  window.open("https://wa.me/?text="+encodeURIComponent(text+"\n"+url),"_blank","noopener");toast(ok?"Link copied":"Opening WhatsApp");
+}
+/* ---- seller dashboard ---- */
+async function dash(){
+  const r=await api("/api/seller/dashboard");if(r.error)return toast(r.error);
+  const t=r.totals,fu=r.fulfil;
+  M(`<h3>📊 Seller dashboard</h3>
+  <div class="tot"><span>Live ads</span><b>${t.live} of ${t.ads}</b></div>
+  <div class="tot"><span>Ad views</span><b>${t.views.toLocaleString()}</b></div>
+  <div class="tot"><span>Delivered sales</span><b>${t.sales} · ${money(t.gross)}</b></div>
+  <div class="tot"><span>Waiting to be paid out</span><b>${money(t.pending)}</b></div>
+  <div class="tot"><span>Paid out so far</span><span>${money(t.paid)}</span></div>
+  ${t.held?`<div class="tot"><span>On hold (problem reported)</span><b>${money(t.held)}</b></div>`:""}
+  <h3 style="margin-top:14px">Orders to fulfil (${fu.length})</h3>${fu.length?fu.map(o=>`<div class="line"><div class="g"><b>${E(o.no)}</b> <span class="vb">${E(D_LBL[o.dstatus]||"Order placed")}</span><br><span class="m">${o.items.map(i=>E(i.t)+" x"+i.q+" · "+money(i.p*i.q)).join("<br>")}${o.dday?"<br>🚚 "+fmtDay(o.dday)+", "+E(o.slot):""}</span></div></div>`).join(""):'<p class="m">Nothing to fulfil right now.</p>'}
+  <h3 style="margin-top:14px">Your ads</h3>${r.ads.length?r.ads.map(a=>`<div class="line" style="cursor:pointer" onclick="view(${a.id})"><div class="g"><b>${E(a.t)}</b>${a.live?"":' <span class="m">(not live)</span>'}<br><span class="m">👁 ${a.views} view${a.views==1?"":"s"} · ${a.sales} sale${a.sales==1?"":"s"}${a.gross?" · "+money(a.gross):""}</span></div></div>`).join(""):'<p class="m">You have not posted any ads yet.</p>'}
+  <div class="row"><button class="btn alt" onclick="account()">Back</button></div>`);
+}
+
+/* ---- cancel an order and report a problem ---- */
+function cancelOrder(no){
+  const o=myOrders.find(x=>x.no==no);if(!o)return;
+  M(`<h3>Cancel order ${E(no)}?</h3><p class="m">${o.status=="paid"?"You already paid online, so your money will be refunded to your original payment method.":"You have not been charged."}</p><label>Reason</label><select id="cR">${opts(["Changed my mind","Ordered by mistake","Found a better price","Delivery date does not suit me","Other"])}</select><div class="err" id="er"></div><div class="row"><button class="btn alt" onclick="orderView('${E(no)}')">Keep order</button><button class="btn" onclick="doCancel('${E(no)}')">Cancel order</button></div>`);
+}
+async function doCancel(no){const r=await api("/api/orders/"+no+"/cancel","POST",{reason:$("cR").value});if(r.error)return invalid([],r.error);toast("Order cancelled");account()}
+function reportProblem(no){
+  M(`<h3>Report a problem</h3><p class="m">Tell us what went wrong with order ${E(no)}. You can report a problem within 48 hours of delivery. The seller's payout is paused while we check.</p><label>What went wrong?</label><select id="rR">${opts(["Item not received","Not as described","Damaged","Wrong item","Other"])}</select><label>Details</label><textarea id="rN" rows="3" maxlength="500" placeholder="Describe what happened"></textarea><div class="err" id="er"></div><div class="row"><button class="btn alt" onclick="orderView('${E(no)}')">Back</button><button class="btn" onclick="doReport('${E(no)}')">Send report</button></div>`);
+}
+async function doReport(no){
+  if($("rN").value.trim().length<5)return invalid("rN","Describe what happened (a few words is enough).");
+  const r=await api("/api/orders/"+no+"/dispute","POST",{reason:$("rR").value,note:$("rN").value});if(r.error)return invalid([],r.error);toast("Report sent. We will update you soon.");account();
+}
+/* ---- admin: reported problems and refunds ---- */
+async function adminDisp(){
+  const r=await api("/api/admin/disputes");if(r.error)return toast(r.error);
+  M(`<h3>⚖️ Problems reported (${r.disputes.length})</h3>${r.disputes.length?r.disputes.map(d=>`<div class="line"><div class="g"><b>${E(d.order_no)}</b> · ${E(d.uname)} · ${money(d.total)}<br><span class="m">${E(d.reason)}: ${E(d.note)}<br>${E(d.items.join(", "))} · ${E(d.pay)}</span></div><div><button class="sm" onclick="resolveDisp(${d.id},1)">Refund</button> <button class="sm" onclick="resolveDisp(${d.id},0)">Reject</button></div></div>`).join(""):'<p class="m">Nothing to review.</p>'}
+  <h3 style="margin-top:14px">Refunds to send (${r.refunds.length})</h3>${r.refunds.length?r.refunds.map(o=>{const ps=o.ref&&r.online;return `<div class="line"><div class="g"><b>${E(o.no)}</b> · ${E(o.uname||"")} · ${money(o.total)}<br><span class="m">${ps?"Paid online: refund through Paystack":"Send by Mobile Money, then record the transaction ID"}</span></div>${ps?`<button class="sm" onclick="doRefund('${E(o.no)}')">Refund</button>`:`<button class="sm" onclick="refundRef('${E(o.no)}')">Record</button>`}</div>`}).join(""):'<p class="m">No refunds waiting.</p>'}<div class="row"><button class="btn" onclick="account()">Back</button></div>`);
+}
+const resolveDisp=(id,refund)=>M(`<h3>${refund?"Approve refund":"Reject report"}</h3><p class="m">Add a short note the buyer will see (optional).</p><input id="dnote" maxlength="300"><div class="err" id="er"></div><div class="row"><button class="btn alt" onclick="adminDisp()">Back</button><button class="btn" onclick="saveDisp(${id},${refund})">Confirm</button></div>`);
+async function saveDisp(id,refund){const r=await api("/api/admin/disputes/"+id,"POST",{refund:!!refund,note:$("dnote").value});if(r.error)return invalid([],r.error);toast(r.sellerPaid?"Done. This seller was already paid, so recover the money from them.":"Done");adminDisp()}
+async function doRefund(no){const r=await api("/api/admin/orders/"+no+"/refund","POST",{paystack:true});if(r.error)return toast(r.error);toast("Refund started");adminDisp()}
+const refundRef=no=>M(`<h3>Record refund</h3><p class="m">After you refund the buyer by Mobile Money, enter the transaction ID.</p><label>Mobile Money transaction ID</label><input id="rfr" maxlength="40"><div class="err" id="er"></div><div class="row"><button class="btn alt" onclick="adminDisp()">Cancel</button><button class="btn" onclick="saveRefund('${E(no)}')">Mark refunded</button></div>`);
+async function saveRefund(no){if($("rfr").value.trim().length<4)return invalid("rfr","Enter the transaction ID (at least 4 characters).");const r=await api("/api/admin/orders/"+no+"/refund","POST",{ref:$("rfr").value});if(r.error)return invalid("rfr",r.error);toast("Refund recorded");adminDisp()}
+/* ---- search: suggestions, recent searches, near me ---- */
+let recent=L("ws_recent",[]),sugI=-1;
+const saveRecent=q=>{q=q.trim();if(q.length<2)return;recent=[q,...recent.filter(x=>x.toLowerCase()!=q.toLowerCase())].slice(0,6);S("ws_recent",recent)};
+function clearRecent(){recent=[];S("ws_recent",recent);sugDraw()}
+function sugList(){
+  const q=$("q").value.toLowerCase().trim();
+  if(!q)return{head:recent.length?"Recent searches":"",items:recent.map(t=>({t,ic:"🕘"})),clear:!!recent.length};
+  const seen=new Set(),out=[],ws=q.split(/\s+/);
+  CATS.forEach((c,i)=>{if(c[0].toLowerCase().includes(q))out.push({t:c[0],ic:c[1],cat:i})});
+  for(const a of ads){if(a.x||a.h)continue;const tl=a.t.toLowerCase();if(ws.every(w=>tl.includes(w))&&!seen.has(tl)){seen.add(tl);out.push({t:a.t,ic:"🔎"})}if(out.length>=7)break}
+  return{head:"",items:out.slice(0,7),clear:false};
+}
+function sugDraw(){
+  const box=$("sug"),s=sugList();sugI=-1;
+  if(!s.items.length){box.hidden=true;return}
+  box._items=s.items;
+  box.innerHTML=(s.head?`<div class="sh"><span>${s.head}</span>${s.clear?'<button type="button" onmousedown="event.preventDefault();clearRecent()">Clear</button>':""}</div>`:"")+s.items.map((x,i)=>`<button type="button" onmousedown="event.preventDefault();sugPick(${i})">${x.ic} ${E(x.t)}</button>`).join("");
+  box.hidden=false;
+}
+function sugPick(i){
+  const x=$("sug")._items[i];if(!x)return;
+  if(x.cat!=null){st.cat=x.cat;$("q").value=""}else{$("q").value=x.t;saveRecent(x.t)}
+  $("sug").hidden=true;st.n=8;draw();
+}
+$("q").addEventListener("focus",sugDraw);
+$("q").addEventListener("input",sugDraw);
+$("q").addEventListener("blur",()=>setTimeout(()=>{$("sug").hidden=true},120));
+$("q").addEventListener("keydown",e=>{
+  const bs=[...$("sug").querySelectorAll("button[onmousedown*=sugPick]")];
+  if(e.key=="ArrowDown"||e.key=="ArrowUp"){if(!bs.length)return;e.preventDefault();sugI=(sugI+(e.key=="ArrowDown"?1:-1)+bs.length)%bs.length;bs.forEach((b,i)=>b.classList.toggle("on",i==sugI))}
+  else if(e.key=="Enter"){if(sugI>=0&&bs.length){e.preventDefault();sugPick(sugI)}else{saveRecent($("q").value);$("sug").hidden=true}}
+  else if(e.key=="Escape")$("sug").hidden=true;
+});
+const REGION_PTS={"Greater Accra":[5.60,-0.19],"Ashanti":[6.69,-1.62],"Western":[4.90,-1.76],"Central":[5.11,-1.25],"Eastern":[6.09,-0.26],"Volta":[6.60,0.47],"Northern":[9.40,-0.84]};
+function nearMe(){
+  if(!navigator.geolocation)return toast("Your browser can't share your location.");
+  toast("Finding your area…");
+  navigator.geolocation.getCurrentPosition(p=>{
+    const a=p.coords.latitude,b=p.coords.longitude;let best="",d=1e9;
+    for(const [r,[x,y]] of Object.entries(REGION_PTS)){const k=Math.hypot(x-a,(y-b)*Math.cos(a*Math.PI/180));if(k<d){d=k;best=r}}
+    if(d>3||!LOCS.includes(best))return toast("You seem to be outside Ghana, so all ads are shown.");
+    $("loc").value=best;st.n=8;draw();toast("Showing ads in "+best+", near you");
+  },e=>toast(e.code==1?"Location is blocked. Allow it in your browser settings, or pick a region.":"Could not find your location."),{timeout:10000,maximumAge:6e5});
+}
+$("near").onclick=nearMe;
+/* ---- install as an app and phone alerts ---- */
+let installEv=null;
+addEventListener("beforeinstallprompt",e=>{e.preventDefault();installEv=e});
+const isApp=()=>matchMedia("(display-mode: standalone)").matches||navigator.standalone===true;
+if("serviceWorker" in navigator)addEventListener("load",()=>navigator.serviceWorker.register("/sw.js").catch(()=>{}));
+async function installApp(){
+  if(installEv){installEv.prompt();await installEv.userChoice.catch(()=>{});installEv=null;return account()}
+  M(`<h3>Install DealMart</h3><p><b>iPhone:</b> open this site in Safari, tap the Share button, then “Add to Home Screen”.</p><p><b>Android:</b> open the browser menu and tap “Install app” or “Add to Home screen”.</p><div class="row"><button class="btn" onclick="account()">OK</button></div>`);
+}
+async function pushState(){
+  if(!("serviceWorker" in navigator)||!("PushManager" in window)||!("Notification" in window))return"unsupported";
+  if(Notification.permission=="denied")return"denied";
+  const r=await navigator.serviceWorker.ready;return(await r.pushManager.getSubscription())?"on":"off";
+}
+const urlB64=s=>{const b=(s+"=".repeat((4-s.length%4)%4)).replace(/-/g,"+").replace(/_/g,"/");return Uint8Array.from([...atob(b)].map(c=>c.charCodeAt(0)))};
+async function pushOn(){
+  try{
+    if(await Notification.requestPermission()!="granted")return toast("Alerts are blocked. Allow notifications in your browser settings.");
+    const k=await api("/api/push/key");if(!k.key)return toast("Phone alerts are not set up on the server yet.");
+    const reg=await navigator.serviceWorker.ready,sub=await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:urlB64(k.key)});
+    const r=await api("/api/push/subscribe","POST",{sub:sub.toJSON()});if(r.error)return toast(r.error);toast("Phone alerts are on");account();
+  }catch(e){toast("Could not turn on alerts on this device.")}
+}
+async function pushOff(){
+  try{const reg=await navigator.serviceWorker.ready,s=await reg.pushManager.getSubscription();if(s){await api("/api/push/unsubscribe","POST",{endpoint:s.endpoint});await s.unsubscribe()}}catch{}
+  toast("Phone alerts are off");account();
+}
+const appSection=ps=>`<h3 style="margin-top:16px">📲 App and alerts</h3><div class="row">${isApp()?"":`<button class="btn alt" onclick="installApp()">Install app</button>`}${ps=="off"?'<button class="btn alt" onclick="pushOn()">🔔 Turn on phone alerts</button>':ps=="on"?'<button class="btn alt" onclick="pushOff()">🔕 Turn off phone alerts</button>':""}</div>${ps=="denied"?'<p class="m" style="font-size:12px">Phone alerts are blocked in your browser settings.</p>':ps=="unsupported"?'<p class="m" style="font-size:12px">Phone alerts are not available in this browser. On iPhone, install the app first, then turn them on.</p>':""}`;

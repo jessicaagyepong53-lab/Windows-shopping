@@ -12,6 +12,7 @@
 
   "minOrder": 100,
   "codMax": 100,
+  "cancelHoursBefore": 24,
   "commissionPercent": 0,
   "showSamples": true,
 

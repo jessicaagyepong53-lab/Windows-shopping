@@ -2,15 +2,17 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<base href="/">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="description" content="DealMart: great deals every day. Buy and sell new and used items across Ghana.">
+<meta name="description" content="%OG_DESC%">
 <meta name="theme-color" content="#374151">
 <meta property="og:type" content="website">
-<meta property="og:title" content="DealMart – Great deals. Every day.">
-<meta property="og:description" content="Buy and sell across Ghana.">
-<meta property="og:image" content="%SITE%/og-image.png">
+<meta property="og:title" content="%OG_TITLE%">
+<meta property="og:url" content="%OG_URL%">
+<meta property="og:description" content="%OG_DESC%">
+<meta property="og:image" content="%OG_IMAGE%">
 <meta name="twitter:card" content="summary_large_image">
-<title>DealMart – Great deals. Every day.</title>
+<title>%OG_TITLE%</title>
 <link rel="icon" href="favicon.ico" sizes="any">
 <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
@@ -32,7 +34,8 @@
 <h1>What are you looking for?</h1>
 <div class="search">
 <select id="loc" aria-label="Location"></select>
-<input id="q" type="search" placeholder="I am looking for..." aria-label="Search">
+<button class="near" id="near" type="button" title="Show ads in my area">📍 Near me</button>
+<div class="qw"><input id="q" type="search" placeholder="I am looking for..." aria-label="Search" autocomplete="off"><div class="sug" id="sug" hidden></div></div>
 </div>
 </section>
 

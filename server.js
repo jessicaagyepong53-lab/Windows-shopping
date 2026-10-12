@@ -10,6 +10,8 @@ const PAY=process.env.PAY_NUMBER||CFG.payNumber||"",PAYNAME=CFG.payName||"";
 const COMPANY=CFG.company||"DealMart",SUPPORT_EMAIL=process.env.SUPPORT_EMAIL||CFG.supportEmail||"",SUPPORT_WA=process.env.SUPPORT_WHATSAPP||CFG.supportWhatsapp||"",SUPPORT_HOURS=CFG.supportHours||"Monday to Saturday, 8am to 6pm";
 const COMM=Math.max(0,Math.min(50,Number(CFG.commissionPercent??0)||0)); // % of the item price kept by DealMart
 const PROD=process.env.NODE_ENV=="production",MIN_PW=8;
+const CANCEL_H=Math.max(0,Number(CFG.cancelHoursBefore??24)||0); // refund policy: orders can only be cancelled (and refunded) this many hours before the delivery window starts, and never once out for delivery
+
 const isValidEmail=s=>/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(s||"").trim());
 const RATE_LIMIT=Number(process.env.RATE_LIMIT||CFG.rateLimit||60); // sign-in type requests per 15 minutes per internet address (many people share one address on mobile networks)
 const SHOW_SAMPLES=CFG.showSamples!==false; // set "showSamples": false in config.json to hide the demo ads
@@ -45,11 +47,14 @@ CREATE TABLE IF NOT EXISTS earnings(id INTEGER PRIMARY KEY,order_no TEXT,seller 
 CREATE TABLE IF NOT EXISTS payouts(id INTEGER PRIMARY KEY,seller INTEGER,amount REAL,ref TEXT,created INTEGER,by_user INTEGER);
 CREATE TABLE IF NOT EXISTS addresses(id INTEGER PRIMARY KEY,user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,label TEXT,name TEXT,phone TEXT,region TEXT,addr TEXT,gps TEXT);
 CREATE TABLE IF NOT EXISTS codes(user_id INTEGER PRIMARY KEY,hash TEXT,expires INTEGER,phone TEXT);
+CREATE TABLE IF NOT EXISTS disputes(id INTEGER PRIMARY KEY,order_no TEXT,user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,reason TEXT,note TEXT,status TEXT,resolution TEXT,created INTEGER,resolved INTEGER);
+CREATE TABLE IF NOT EXISTS push_subs(id INTEGER PRIMARY KEY,user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,endpoint TEXT UNIQUE,sub TEXT,created INTEGER);
 `);
 if(!db.prepare("PRAGMA table_info(users)").all().some(c=>c.name=="verified"))db.exec("ALTER TABLE users ADD COLUMN verified INTEGER DEFAULT 0");
 if(!db.prepare("PRAGMA table_info(ads)").all().some(c=>c.name=="attrs"))db.exec("ALTER TABLE ads ADD COLUMN attrs TEXT DEFAULT '{}'");
 if(!db.prepare("PRAGMA table_info(ads)").all().some(c=>c.name=="hidden"))db.exec("ALTER TABLE ads ADD COLUMN hidden INTEGER DEFAULT 0");
-for(const [col,ty] of [["status","TEXT"],["ref","TEXT"],["dname","TEXT"],["dphone","TEXT"],["region","TEXT"],["daddr","TEXT"],["gps","TEXT"],["notes","TEXT"],["dday","TEXT"],["slot","TEXT"],["fee","REAL"],["dstatus","TEXT"]])if(!db.prepare("PRAGMA table_info(orders)").all().some(c=>c.name==col))db.exec(`ALTER TABLE orders ADD COLUMN ${col} ${ty}`);
+if(!db.prepare("PRAGMA table_info(ads)").all().some(c=>c.name=="views"))db.exec("ALTER TABLE ads ADD COLUMN views INTEGER DEFAULT 0");
+for(const [col,ty] of [["status","TEXT"],["ref","TEXT"],["dname","TEXT"],["dphone","TEXT"],["region","TEXT"],["daddr","TEXT"],["gps","TEXT"],["notes","TEXT"],["dday","TEXT"],["slot","TEXT"],["fee","REAL"],["dstatus","TEXT"],["refund","TEXT"],["refund_ref","TEXT"],["cancel_note","TEXT"],["delivered","INTEGER"]])if(!db.prepare("PRAGMA table_info(orders)").all().some(c=>c.name==col))db.exec(`ALTER TABLE orders ADD COLUMN ${col} ${ty}`);
 for(const [col,ty] of [["agreed","INTEGER"],["payout_net","TEXT"],["payout_num","TEXT"],["payout_name","TEXT"]])if(!db.prepare("PRAGMA table_info(users)").all().some(c=>c.name==col))db.exec(`ALTER TABLE users ADD COLUMN ${col} ${ty}`);
 if(!db.prepare("SELECT 1 FROM ads LIMIT 1").get()){
   const SEED=[["Toyota Highlander 2008",0,"Ashanti",55000,"Used","🚙",1],["Honda Civic 2009, clean",0,"Greater Accra",38000,"Used","🚗"],["Toyota Matrix, foreign used",0,"Greater Accra",42000,"Used","🚘"],["Honda Civic Sport 2018",0,"Ashanti",120000,"Used","🏎️",1],["3 bedroom house to let",1,"Greater Accra",2800,"Used","🏡"],["iPhone 13 128GB",2,"Greater Accra",5200,"Used","📱",1],["Samsung Galaxy Tab A8",2,"Central",1900,"Brand new","📲"],["HP Laptop 15, 8GB RAM",3,"Ashanti",3400,"Refurbished","💻"],["55 inch Smart TV",3,"Greater Accra",3900,"Brand new","📺",1],["Sofa set, 5 seater",4,"Western",2500,"Brand new","🛋️"],["Ankara dress, size M",5,"Volta",180,"Brand new","👗"],["Shea butter gift set",6,"Northern",95,"Brand new","🧴"]];
@@ -88,8 +93,10 @@ async function ps(method,p,body){
   catch{return{status:false}}
 }
 function markPaid(o){
-  if(db.prepare("UPDATE orders SET status='paid' WHERE id=? AND status='awaiting_payment'").run(o.id).changes&&o.user_id)
+  if(db.prepare("UPDATE orders SET status='paid' WHERE id=? AND status='awaiting_payment'").run(o.id).changes&&o.user_id){
     for(const it of JSON.parse(o.items))if(it.id)db.prepare("INSERT OR IGNORE INTO bought VALUES(?,?,?,?)").run(o.user_id,it.id,it.o??null,Date.now());
+    orderAlerts(o);
+  }
 }
 const paidOk=(o,d)=>!!d&&d.status=="success"&&d.reference===o.ref&&d.currency=="GHS"&&d.amount===Math.round(o.total*100);
 const FIELDS=[
@@ -112,7 +119,7 @@ function cleanAttrs(c,at){
   return out;
 }
 let mailer=null;
-if(CFG.smtp||process.env.SMTP_URL){try{mailer=require("nodemailer").createTransport(process.env.SMTP_URL||CFG.smtp)}catch{console.log("Email is configured but the 'nodemailer' package is missing. Run: npm install")}}
+if((CFG.smtp&&!/example\.com$/.test(CFG.smtp.host||""))||process.env.SMTP_URL){try{mailer=require("nodemailer").createTransport(process.env.SMTP_URL||CFG.smtp)}catch{console.log("Email is configured but the 'nodemailer' package is missing. Run: npm install")}}
 async function mail(to,subject,text){
   if(!mailer){console.log(`[EMAIL to ${to}] ${subject}\n${text}\n`);return false}
   try{await mailer.sendMail({from:CFG.mailFrom||process.env.MAIL_FROM||`${COMPANY} <no-reply@localhost>`,to,subject,text});return true}
@@ -128,6 +135,36 @@ const disp=n=>{const p=String(n||"").trim().split(/\s+/);return p.length>1?p[0]+
 const shape=r=>({id:r.id,t:r.t,c:r.c,l:r.l,p:r.p,k:r.k,d:r.d||"",ph:r.ph,imgs:JSON.parse(r.imgs||"[]"),e:r.e,f:r.f,n:!!r.n,x:!!r.x,s:!!r.s,o:r.owner,sn:r.sn?disp(r.sn):null,sv:!!r.sv,sa:r.sa||0,sc:r.sc||0,ra:r.ra||0,rn:r.rn||0,at:JSON.parse(r.attrs||"{}"),h:!!r.hidden,pm:!!r.pm});
 const AD_SQL=`SELECT a.*,u.name sn,u.verified sv,(SELECT ROUND(AVG(stars),1) FROM item_reviews WHERE seller=a.owner) sa,(SELECT COUNT(*) FROM item_reviews WHERE seller=a.owner) sc,(SELECT ROUND(AVG(stars),1) FROM item_reviews WHERE ad_id=a.id) ra,(SELECT COUNT(*) FROM item_reviews WHERE ad_id=a.id) rn,(SELECT COUNT(*) FROM promos WHERE ad_id=a.id AND status='active' AND ends>CAST(strftime('%s','now') AS INTEGER)*1000) pm FROM ads a LEFT JOIN users u ON u.id=a.owner`;
 const getAd=id=>{const r=db.prepare(AD_SQL+" WHERE a.id=?").get(id);return r&&shape(r)};
+let webpush=null,VAPID=null;
+try{
+  webpush=require("web-push");const vf=path.join(DATA,"vapid.json");
+  try{VAPID=JSON.parse(fs.readFileSync(vf,"utf8"))}catch{VAPID=webpush.generateVAPIDKeys();fs.writeFileSync(vf,JSON.stringify(VAPID))}
+  webpush.setVapidDetails("mailto:"+(isValidEmail(SUPPORT_EMAIL)?SUPPORT_EMAIL:"admin@example.com"),VAPID.publicKey,VAPID.privateKey);
+}catch(e){webpush=null;console.log("Phone alerts are off. Run: npm install")}
+function push(uid,title,body){
+  if(!webpush)return;
+  for(const r of db.prepare("SELECT id,sub FROM push_subs WHERE user_id=?").all(uid))
+    webpush.sendNotification(JSON.parse(r.sub),JSON.stringify({title,body:String(body).slice(0,180),url:"/"}),{TTL:86400}).catch(e=>{if(e.statusCode==404||e.statusCode==410)db.prepare("DELETE FROM push_subs WHERE id=?").run(r.id)});
+}
+const SITE_BASE=()=>String(process.env.SITE_URL||CFG.siteUrl||"http://localhost:"+PORT).replace(/\/$/,"");
+const notifyAt=new Map();
+// Email always (when the user has a real email); SMS only when o.sms. o.key+o.every throttles repeats. Never blocks or throws.
+function notify(uid,subject,text,o={}){
+  try{
+    if(!uid||uid===SAMPLE_ID)return;
+    if(o.key){const k=uid+":"+o.key;if(Date.now()-(notifyAt.get(k)||0)<(o.every||6e5))return;notifyAt.set(k,Date.now())}
+    push(uid,subject,text);
+    const u=db.prepare("SELECT name,email,phone FROM users WHERE id=?").get(uid);if(!u)return;
+    if(u.email&&!u.email.endsWith(".local"))mail(u.email,subject,`Hi ${String(u.name||"there").split(" ")[0]},\n\n${text}\n\n${COMPANY}\n${SITE_BASE()}`).catch(()=>{});
+    if(o.sms&&u.phone)sms(u.phone,subject+": "+text);
+  }catch(e){console.log("Notify failed:",e.message)}
+}
+function orderAlerts(o){
+  const when=o.dday?` Delivery: ${o.dday}, ${o.slot}.`:"",by={};
+  notify(o.user_id,`Order ${o.no} confirmed`,`Thanks for your order ${o.no} (GH₵ ${Number(o.total).toLocaleString()}).${when} You can track it under My orders.`,{sms:true});
+  for(const it of JSON.parse(o.items))if(it.o)(by[it.o]=by[it.o]||[]).push(it.t+" x"+it.q);
+  for(const [sid,l] of Object.entries(by))notify(+sid,`New order ${o.no}`,`You have a new order: ${l.join(", ")}. Please get it ready for delivery.${when}`,{sms:true});
+}
 const sms=(to,msg)=>console.log(`[SMS to ${to}] ${msg}`); // TODO: replace with a real SMS provider (Hubtel, Twilio...) when going live
 
 function saveImgs(list,keep){
@@ -157,7 +194,7 @@ if(PROD)app.set("trust proxy",1);
 app.use((req,res,next)=>{
   if(PROD&&req.headers["x-forwarded-proto"]==="http")return res.redirect(301,"https://"+req.headers.host+req.originalUrl);
   res.setHeader("X-Content-Type-Options","nosniff");res.setHeader("Referrer-Policy","same-origin");res.setHeader("X-Frame-Options","DENY");
-  res.setHeader("Permissions-Policy","camera=(), microphone=(), geolocation=()");
+  res.setHeader("Permissions-Policy","camera=(), microphone=(), geolocation=(self)");
   res.setHeader("Content-Security-Policy","default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'self'");
   if(req.secure)res.setHeader("Strict-Transport-Security","max-age=15552000");
   next();
@@ -241,13 +278,14 @@ app.post("/api/orders",need,async(req,res)=>{
   const oid=Number(db.prepare("INSERT INTO orders(no,user_id,items,total,pay,addr,created,status,ref,dname,dphone,region,daddr,gps,notes,dday,slot,fee,dstatus) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").run(no,req.user.id,JSON.stringify(items),total,pay,`${ad.addr}, ${ad.region}`,Date.now(),online?"awaiting_payment":"placed",ref,ad.name,ad.phone,ad.region,ad.addr,ad.gps,notes,b.day,b.slot,fee,"placed").lastInsertRowid);
   if(!online){
     for(const [aid,ow] of buy)db.prepare("INSERT OR IGNORE INTO bought VALUES(?,?,?,?)").run(req.user.id,aid,ow,Date.now());
+    orderAlerts({no,user_id:req.user.id,items:JSON.stringify(items),total,dday:b.day,slot:b.slot});
     return res.json({no,total,fee,pay,dday:b.day,slot:b.slot});
   }
   const j=await ps("POST","/transaction/initialize",{email:req.user.email,amount:Math.round(total*100),currency:"GHS",reference:ref,callback_url:SITE(req)+"/",channels:[pay=="Card"?"card":"mobile_money"],metadata:{order:no}});
   if(!j.status||!j.data){db.prepare("DELETE FROM orders WHERE id=?").run(oid);return res.status(502).json({error:"Could not start the payment. Please try again."})}
   res.json({no,total,fee,pay,dday:b.day,slot:b.slot,online:true,url:j.data.authorization_url});
 });
-app.get("/api/orders",need,(req,res)=>res.json({orders:db.prepare("SELECT * FROM orders WHERE user_id=? AND (status IS NULL OR status!='awaiting_payment') ORDER BY created DESC").all(req.user.id).map(o=>({no:o.no,items:JSON.parse(o.items),total:o.total,fee:o.fee,pay:o.pay,created:o.created,status:o.status,dstatus:o.dstatus||"placed",dday:o.dday,slot:o.slot,dname:o.dname,dphone:o.dphone,region:o.region,daddr:o.daddr,gps:o.gps,notes:o.notes}))}));
+app.get("/api/orders",need,(req,res)=>res.json({orders:db.prepare("SELECT * FROM orders WHERE user_id=? AND (status IS NULL OR status!='awaiting_payment') ORDER BY created DESC").all(req.user.id).map(o=>({no:o.no,items:JSON.parse(o.items),total:o.total,fee:o.fee,pay:o.pay,created:o.created,status:o.status,refund:o.refund||"",delivered:o.delivered||null,dispute:dispOf(o.no,req.user.id),cancelBy:cancelBy(o),cancelHours:CANCEL_H,dstatus:o.dstatus||"placed",dday:o.dday,slot:o.slot,dname:o.dname,dphone:o.dphone,region:o.region,daddr:o.daddr,gps:o.gps,notes:o.notes}))}));
 
 app.post("/api/verify/send",need,limit,(req,res)=>{
   const ph=String((req.body||{}).phone||req.user.phone||"").trim();
@@ -329,6 +367,9 @@ app.post("/api/threads/:id/messages",need,chatLimit,(req,res)=>{
     db.prepare("INSERT INTO msgs(thread,sender,kind,body,created) VALUES(?,?,'text',?,?)").run(t.id,req.user.id,body,now);
   }
   autoReply(t,b.offer!=null?Number(b.offer):0);
+  {const to=t.buyer===req.user.id?t.seller:t.buyer,ttl=(db.prepare("SELECT t FROM ads WHERE id=?").get(t.ad_id)||{}).t||"an item";
+  if(b.offer!=null)notify(to,"New offer on "+ttl,`${disp(req.user.name)} offered GH₵ ${Number(b.offer).toLocaleString()} for "${ttl}". Open ${COMPANY} and tap the Messages icon to accept or decline.`,{sms:true});
+  else notify(to,"New message about "+ttl,`${disp(req.user.name)} sent you a message about "${ttl}". Open ${COMPANY} and tap the Messages icon to reply.`,{key:"m"+t.id,every:6e5})}
   db.prepare("UPDATE threads SET updated=? WHERE id=?").run(now,t.id);res.json({ok:true});
 });
 app.post("/api/messages/:id/respond",need,chatLimit,(req,res)=>{
@@ -339,7 +380,9 @@ app.post("/api/messages/:id/respond",need,chatLimit,(req,res)=>{
   db.prepare("UPDATE msgs SET status=? WHERE id=?").run(ok?"accepted":"declined",m.id);
   if(ok)db.prepare("UPDATE threads SET deal=? WHERE id=?").run(m.amount,t.id);
   db.prepare("INSERT INTO msgs(thread,sender,kind,body,created,seen) VALUES(?,0,'system',?,?,1)").run(t.id,ok?`Offer of ${amt} accepted. The buyer can now order at this price.`:`Offer of ${amt} declined.`,now);
-  db.prepare("UPDATE threads SET updated=? WHERE id=?").run(now,t.id);res.json({ok:true});
+  db.prepare("UPDATE threads SET updated=? WHERE id=?").run(now,t.id);{const ttl=(db.prepare("SELECT t FROM ads WHERE id=?").get(t.ad_id)||{}).t||"an item";
+  notify(m.sender,`Offer ${ok?"accepted":"declined"}`,`Your offer of ${amt} on "${ttl}" was ${ok?"accepted. You can now order at this price.":"declined."}`,{sms:true})}
+  res.json({ok:true});
 });
 app.get("/api/deals",need,(req,res)=>{const d={};for(const r of db.prepare("SELECT ad_id,deal FROM threads WHERE buyer=? AND deal IS NOT NULL").all(req.user.id))d[r.ad_id]=r.deal;res.json({deals:d})});
 const REASONS=["Scam or fraud","Prohibited item","Wrong category","Duplicate ad","Offensive content","Other"];
@@ -429,12 +472,18 @@ function createEarnings(o){
     ins.run(o.no,it.o,it.id,it.t,gross,com,Math.round((gross-com)*100)/100,Date.now());
   }
 }
-app.get("/api/admin/orders",need,adm,(req,res)=>res.json({orders:db.prepare("SELECT o.*,u.name uname FROM orders o LEFT JOIN users u ON u.id=o.user_id WHERE (o.status IS NULL OR o.status!='awaiting_payment') AND (o.dstatus IS NULL OR o.dstatus!='delivered') ORDER BY o.dday IS NULL,o.dday,o.slot,o.id").all().map(o=>({no:o.no,uname:o.uname,items:JSON.parse(o.items),total:o.total,pay:o.pay,status:o.status,dstatus:o.dstatus||"placed",dday:o.dday,slot:o.slot,dname:o.dname,dphone:o.dphone,region:o.region,daddr:o.daddr,gps:o.gps,notes:o.notes}))}));
+app.get("/api/admin/orders",need,adm,(req,res)=>res.json({orders:db.prepare("SELECT o.*,u.name uname FROM orders o LEFT JOIN users u ON u.id=o.user_id WHERE (o.status IS NULL OR o.status!='awaiting_payment') AND (o.dstatus IS NULL OR o.dstatus NOT IN ('delivered','cancelled')) ORDER BY o.dday IS NULL,o.dday,o.slot,o.id").all().map(o=>({no:o.no,uname:o.uname,items:JSON.parse(o.items),total:o.total,pay:o.pay,status:o.status,dstatus:o.dstatus||"placed",dday:o.dday,slot:o.slot,dname:o.dname,dphone:o.dphone,region:o.region,daddr:o.daddr,gps:o.gps,notes:o.notes}))}));
 app.post("/api/admin/orders/:no/advance",need,adm,(req,res)=>{
   const o=db.prepare("SELECT * FROM orders WHERE no=?").get(String(req.params.no));if(!o||o.status=="awaiting_payment")return res.status(404).json({error:"Order not found."});
+  if(["cancelled","delivered"].includes(o.dstatus))return res.status(400).json({error:"This order can no longer be moved forward."});
   const next=FLOW[Math.min(FLOW.indexOf(o.dstatus||"placed")+1,3)];
-  db.prepare("UPDATE orders SET dstatus=?"+(next=="delivered"&&o.status=="placed"?",status='paid'":"")+" WHERE id=?").run(next,o.id);
+  db.prepare("UPDATE orders SET dstatus=?"+(next=="delivered"&&o.status=="placed"?",status='paid'":"")+(next=="delivered"?",delivered="+Date.now():"")+" WHERE id=?").run(next,o.id);
   if(next=="delivered")createEarnings(o);
+  if(next!==(o.dstatus||"placed")){
+    const DM={confirmed:"has been confirmed and is being prepared.",out:"is out for delivery. Please keep your phone close.",delivered:"has been delivered. Thank you! You can now review the items you bought."};
+    notify(o.user_id,`Order ${o.no} update`,`Your order ${o.no} ${DM[next]}`,{sms:next!="confirmed"});
+    if(next=="delivered")for(const it of JSON.parse(o.items))if(it.o&&it.o!==SAMPLE_ID)notify(it.o,`Order ${o.no} delivered`,`Order ${o.no} was delivered. Your earnings for the items are now waiting to be paid out.`,{key:"d"+o.no,every:864e5});
+  }
   res.json({ok:true,dstatus:next});
 });
 const BK=path.join(DATA,"backups");fs.mkdirSync(BK,{recursive:true});
@@ -457,6 +506,7 @@ async function backupArchive(){
   const tmp=path.join(BK,"tmp-"+Date.now()+".db");await db.backup(tmp);
   const parts=[tarEntry("shop.db",fs.readFileSync(tmp))];fs.unlinkSync(tmp);
   for(const n of fs.readdirSync(UP)){const p=path.join(UP,n);if(fs.statSync(p).isFile())parts.push(tarEntry("uploads/"+n,fs.readFileSync(p)))}
+  if(fs.existsSync(path.join(DATA,"vapid.json")))parts.push(tarEntry("vapid.json",fs.readFileSync(path.join(DATA,"vapid.json"))));
   parts.push(Buffer.alloc(1024));return require("zlib").gzipSync(Buffer.concat(parts));
 }
 app.get("/api/admin/backup",need,adm,async(req,res)=>{
@@ -496,7 +546,7 @@ app.post("/api/password",need,limit,(req,res)=>{
 });
 // ---- support details and legal pages ----
 app.get("/api/site",(req,res)=>res.json({whatsapp:SUPPORT_WA,email:SUPPORT_EMAIL,company:COMPANY}));
-const fill=(h,req)=>h.replaceAll("%SITE%",SITE(req)).replaceAll("%COMPANY%",COMPANY).replaceAll("%EMAIL%",SUPPORT_EMAIL||"(support email not set yet)").replaceAll("%WHATSAPP%",SUPPORT_WA||"(WhatsApp number not set yet)").replaceAll("%HOURS%",SUPPORT_HOURS).replaceAll("%MIN_ORDER%",String(MIN_ORDER)).replaceAll("%COD_MAX%",String(COD_MAX)).replaceAll("%COMMISSION%",String(COMM));
+const fill=(h,req)=>h.replaceAll("%SITE%",SITE(req)).replaceAll("%COMPANY%",COMPANY).replaceAll("%EMAIL%",SUPPORT_EMAIL||"(support email not set yet)").replaceAll("%WHATSAPP%",SUPPORT_WA||"(WhatsApp number not set yet)").replaceAll("%HOURS%",SUPPORT_HOURS).replaceAll("%MIN_ORDER%",String(MIN_ORDER)).replaceAll("%COD_MAX%",String(COD_MAX)).replaceAll("%COMMISSION%",String(COMM)).replaceAll("%CANCEL_HOURS%",String(CANCEL_H));
 for(const p of ["terms","privacy","contact","faq"])app.get(["/"+p,"/"+p+".html"],(req,res)=>res.type("html").send(fill(fs.readFileSync(path.join(__dirname,"public",p+".html"),"utf8"),req)));
 // ---- seller earnings and payouts ----
 const NETS=["MTN","Telecel","AirtelTigo"];
@@ -515,7 +565,7 @@ app.post("/api/payout",need,(req,res)=>{
 app.get("/api/admin/payouts",need,adm,(req,res)=>res.json({
   rate:COMM,
   sellers:db.prepare("SELECT u.id,u.name,u.payout_net net,u.payout_num num,u.payout_name pname,SUM(e.net) pending,COUNT(*) n FROM earnings e JOIN users u ON u.id=e.seller WHERE e.status='pending' GROUP BY u.id ORDER BY pending DESC").all(),
-  totals:db.prepare("SELECT COALESCE(SUM(commission),0) commission,COALESCE(SUM(CASE WHEN status='pending' THEN net END),0) owed,COALESCE(SUM(CASE WHEN status='paid' THEN net END),0) paid FROM earnings").get(),
+  totals:db.prepare("SELECT COALESCE(SUM(CASE WHEN status!='void' THEN commission END),0) commission,COALESCE(SUM(CASE WHEN status='pending' THEN net END),0) owed,COALESCE(SUM(CASE WHEN status='paid' THEN net END),0) paid FROM earnings").get(),
   fees:db.prepare("SELECT COALESCE(SUM(fee),0) v FROM orders WHERE dstatus='delivered'").get().v}));
 app.post("/api/admin/payouts",need,adm,(req,res)=>{
   const b=req.body||{},sid=+b.seller,ref=String(b.ref||"").trim().slice(0,40);
@@ -527,8 +577,105 @@ app.post("/api/admin/payouts",need,adm,(req,res)=>{
   db.prepare("UPDATE earnings SET status='paid',payout_id=? WHERE seller=? AND status='pending'").run(pid,sid);
   res.json({ok:true,amount});
 });
+const escA=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+function indexHtml(req,ad){
+  const site=SITE(req),m=ad?{title:`${ad.t} – GH₵ ${Number(ad.p).toLocaleString()} | ${COMPANY}`,desc:(ad.d||`${ad.k} in ${ad.l}. Buy and sell across Ghana on ${COMPANY}.`).slice(0,160),img:ad.imgs[0]?site+ad.imgs[0]:site+"/og-image.png",url:site+"/ad/"+ad.id}
+    :{title:COMPANY+" – Great deals. Every day.",desc:COMPANY+": great deals every day. Buy and sell new and used items across Ghana.",img:site+"/og-image.png",url:site+"/"};
+  return fs.readFileSync(path.join(__dirname,"public","index.html"),"utf8").replaceAll("%SITE%",site).replaceAll("%OG_TITLE%",escA(m.title)).replaceAll("%OG_DESC%",escA(m.desc)).replaceAll("%OG_IMAGE%",escA(m.img)).replaceAll("%OG_URL%",escA(m.url));
+}
+app.get("/ad/:id",(req,res)=>{const a=getAd(+req.params.id);res.type("html").send(indexHtml(req,a&&!a.x&&!a.h?a:null))});
+app.get(["/","/index.html"],(req,res)=>res.type("html").send(indexHtml(req,null)));
+const dispOf=(no,uid)=>db.prepare("SELECT id,status,reason,resolution FROM disputes WHERE order_no=? AND user_id=? ORDER BY id DESC LIMIT 1").get(no,uid)||null;
+const slotStart=(day,slot)=>{const m=/^(\d{1,2})\s*(am|pm)/i.exec(String(slot||"")),h=m?(+m[1]%12)+(/pm/i.test(m[2])?12:0):0,[y,mo,d]=String(day).split("-").map(Number),t=new Date(y,mo-1,d,h).getTime();return Number.isFinite(t)?t:null};
+const cancelBy=o=>{const t=o.dday?slotStart(o.dday,o.slot):null;return t==null?null:t-CANCEL_H*36e5};
+const CANCEL_WHY=["Changed my mind","Ordered by mistake","Found a better price","Delivery date does not suit me","Other"],DISPUTE_WHY=["Item not received","Not as described","Damaged","Wrong item","Other"],DISPUTE_HOURS=48;
+const sellersOf=items=>[...new Set(items.map(i=>i.o).filter(Boolean))];
+// after a cancel or refund the buyer loses review rights for those items, unless they bought them again in another live order
+function dropBought(uid,items,exceptNo){
+  const others=db.prepare("SELECT items FROM orders WHERE user_id=? AND no!=? AND (status IS NULL OR status!='awaiting_payment') AND (dstatus IS NULL OR dstatus!='cancelled')").all(uid,exceptNo).flatMap(r=>JSON.parse(r.items).map(i=>i.id));
+  for(const it of items)if(it.id&&!others.includes(it.id))db.prepare("DELETE FROM bought WHERE user_id=? AND ad_id=?").run(uid,it.id);
+}
+app.post("/api/orders/:no/cancel",need,limit,(req,res)=>{
+  const o=db.prepare("SELECT * FROM orders WHERE no=? AND user_id=?").get(String(req.params.no),req.user.id);
+  if(!o||o.status=="awaiting_payment")return res.status(404).json({error:"Order not found."});
+  if(!["placed","confirmed"].includes(o.dstatus||"placed"))return res.status(400).json({error:"This order can no longer be cancelled here. If something is wrong, use Report a problem or contact support."});
+  const cb=cancelBy(o);
+  if(cb!=null&&Date.now()>cb)return res.status(400).json({error:`Orders can only be cancelled at least ${CANCEL_H} hours before the delivery window starts, so this order can no longer be cancelled. Contact support if you need help.`});
+  const why=CANCEL_WHY.includes((req.body||{}).reason)?req.body.reason:"Other",paid=o.status=="paid",items=JSON.parse(o.items);
+  db.prepare("UPDATE orders SET dstatus='cancelled',cancel_note=?,refund=? WHERE id=?").run(why,paid?"pending":"none",o.id);
+  dropBought(req.user.id,items,o.no);
+  notify(req.user.id,`Order ${o.no} cancelled`,paid?`Your order ${o.no} was cancelled. Your refund of GH₵ ${Number(o.total).toLocaleString()} is being processed and will go back to your original payment method.`:`Your order ${o.no} was cancelled. You have not been charged.`,{sms:true});
+  for(const s of sellersOf(items))notify(s,`Order ${o.no} cancelled`,`The buyer cancelled order ${o.no}. You do not need to deliver it.`);
+  res.json({ok:true,refund:paid});
+});
+app.post("/api/orders/:no/dispute",need,limit,(req,res)=>{
+  const o=db.prepare("SELECT * FROM orders WHERE no=? AND user_id=?").get(String(req.params.no),req.user.id),b=req.body||{},note=String(b.note||"").trim().slice(0,500);
+  if(!o||o.dstatus!="delivered")return res.status(400).json({error:"You can report a problem once the order is marked delivered."});
+  if(o.delivered&&Date.now()-o.delivered>DISPUTE_HOURS*36e5)return res.status(400).json({error:`The ${DISPUTE_HOURS}-hour window to report a problem has passed. Please contact support.`});
+  if(!DISPUTE_WHY.includes(b.reason))return res.status(400).json({error:"Choose what went wrong."});
+  if(note.length<5)return res.status(400).json({error:"Describe what happened (a few words is enough)."});
+  if(db.prepare("SELECT 1 FROM disputes WHERE order_no=? AND user_id=?").get(o.no,req.user.id))return res.status(400).json({error:"You have already reported a problem with this order. We will get back to you."});
+  db.prepare("INSERT INTO disputes(order_no,user_id,reason,note,status,created) VALUES(?,?,?,?,'open',?)").run(o.no,req.user.id,b.reason,note,Date.now());
+  db.prepare("UPDATE earnings SET status='held' WHERE order_no=? AND status='pending'").run(o.no);
+  notify(req.user.id,`We received your report on ${o.no}`,`We are looking into the problem you reported on order ${o.no} and will update you soon.`);
+  for(const s of sellersOf(JSON.parse(o.items)))notify(s,`Problem reported on ${o.no}`,`A buyer reported a problem with order ${o.no}. Your earnings for it are on hold while we check.`);
+  res.json({ok:true});
+});
+app.get("/api/admin/disputes",need,adm,(req,res)=>res.json({
+  disputes:db.prepare("SELECT d.id,d.order_no,d.reason,d.note,d.created,u.name uname,o.total,o.pay,o.items FROM disputes d JOIN users u ON u.id=d.user_id JOIN orders o ON o.no=d.order_no WHERE d.status='open' ORDER BY d.id").all().map(d=>({...d,items:JSON.parse(d.items).map(i=>i.t+" x"+i.q)})),
+  refunds:db.prepare("SELECT o.no,o.total,o.pay,o.ref,u.name uname FROM orders o LEFT JOIN users u ON u.id=o.user_id WHERE o.refund='pending' ORDER BY o.id").all(),online:!!PS_SECRET}));
+app.post("/api/admin/disputes/:id",need,adm,(req,res)=>{
+  const d=db.prepare("SELECT * FROM disputes WHERE id=? AND status='open'").get(+req.params.id);if(!d)return res.status(404).json({error:"Report not found."});
+  const b=req.body||{},refund=!!b.refund,note=String(b.note||"").trim().slice(0,300),o=db.prepare("SELECT * FROM orders WHERE no=?").get(d.order_no),items=JSON.parse(o.items);
+  const sellerPaid=!!db.prepare("SELECT 1 FROM earnings WHERE order_no=? AND status='paid'").get(d.order_no);
+  db.prepare("UPDATE disputes SET status=?,resolution=?,resolved=? WHERE id=?").run(refund?"refunded":"rejected",note,Date.now(),d.id);
+  if(refund){
+    db.prepare("UPDATE earnings SET status='void' WHERE order_no=? AND status IN ('held','pending')").run(d.order_no);
+    db.prepare("UPDATE orders SET refund='pending' WHERE no=?").run(d.order_no);dropBought(d.user_id,items,d.order_no);
+  }else db.prepare("UPDATE earnings SET status='pending' WHERE order_no=? AND status='held'").run(d.order_no);
+  notify(d.user_id,`Update on order ${d.order_no}`,refund?`Your report on order ${d.order_no} was approved. Your refund is being processed.${note?" "+note:""}`:`We reviewed your report on order ${d.order_no} and could not approve a refund.${note?" "+note:""} Contact support if you disagree.`,{sms:true});
+  for(const s of sellersOf(items))notify(s,`Update on order ${d.order_no}`,refund?`The problem reported on order ${d.order_no} was upheld and the buyer is being refunded. Earnings for this order are cancelled.`:`The problem reported on order ${d.order_no} was reviewed and closed. Your earnings are released.`);
+  res.json({ok:true,sellerPaid:refund&&sellerPaid});
+});
+app.post("/api/admin/orders/:no/refund",need,adm,async(req,res)=>{
+  const o=db.prepare("SELECT * FROM orders WHERE no=? AND refund='pending'").get(String(req.params.no));if(!o)return res.status(404).json({error:"No refund is waiting for this order."});
+  const b=req.body||{};let ref=String(b.ref||"").trim().slice(0,40);
+  if(b.paystack){
+    if(!PS_SECRET||!o.ref)return res.status(400).json({error:"This order was not paid through Paystack. Send the refund by Mobile Money and record the transaction ID."});
+    const j=await ps("POST","/refund",{transaction:o.ref});if(!j.status)return res.status(502).json({error:"Paystack could not start the refund: "+(j.message||"try again, or refund from your Paystack dashboard.")});
+    ref="paystack";
+  }else if(ref.length<4)return res.status(400).json({error:"Enter the Mobile Money transaction ID you refunded with."});
+  db.prepare("UPDATE orders SET refund='refunded',refund_ref=? WHERE id=?").run(ref,o.id);
+  notify(o.user_id,`Refund sent for ${o.no}`,`Your refund of GH₵ ${Number(o.total).toLocaleString()} for order ${o.no} has been sent. It can take a little while to show.`,{sms:true});
+  res.json({ok:true});
+});
+app.get("/api/push/key",(req,res)=>res.json({key:webpush?VAPID.publicKey:null}));
+app.post("/api/push/subscribe",need,(req,res)=>{
+  const s=(req.body||{}).sub;
+  if(!webpush||!s||typeof s.endpoint!="string"||!/^https:\/\//.test(s.endpoint)||s.endpoint.length>600||!s.keys||!s.keys.p256dh||!s.keys.auth)return res.status(400).json({error:"Phone alerts could not be turned on."});
+  db.prepare("INSERT OR REPLACE INTO push_subs(user_id,endpoint,sub,created) VALUES(?,?,?,?)").run(req.user.id,s.endpoint,JSON.stringify({endpoint:s.endpoint,keys:{p256dh:String(s.keys.p256dh),auth:String(s.keys.auth)}}),Date.now());
+  db.prepare("DELETE FROM push_subs WHERE user_id=? AND id NOT IN (SELECT id FROM push_subs WHERE user_id=? ORDER BY id DESC LIMIT 5)").run(req.user.id,req.user.id);
+  res.json({ok:true});
+});
+app.post("/api/push/unsubscribe",need,(req,res)=>{db.prepare("DELETE FROM push_subs WHERE user_id=? AND endpoint=?").run(req.user.id,String((req.body||{}).endpoint||""));res.json({ok:true})});
+app.get("/sw.js",(req,res)=>{res.setHeader("Cache-Control","no-cache");res.type("js").sendFile(path.join(__dirname,"public","sw.js"))});
+const seenV=new Map();
+app.post("/api/ads/:id/view",(req,res)=>{
+  const a=db.prepare("SELECT id,owner FROM ads WHERE id=? AND x=0 AND hidden=0").get(+req.params.id),k=req.ip+":"+(a&&a.id);
+  if(a&&a.owner!==req.user?.id&&Date.now()-(seenV.get(k)||0)>18e5){seenV.set(k,Date.now());db.prepare("UPDATE ads SET views=views+1 WHERE id=?").run(a.id)}
+  res.json({ok:true});
+});
+app.get("/api/seller/dashboard",need,(req,res)=>{
+  const u=req.user.id,mine=db.prepare("SELECT id,t,views,x,hidden FROM ads WHERE owner=? ORDER BY created DESC").all(u),eb={};
+  db.prepare("SELECT ad_id,COUNT(*) n,SUM(gross) gross FROM earnings WHERE seller=? GROUP BY ad_id").all(u).forEach(r=>eb[r.ad_id]=r);
+  const tot=db.prepare("SELECT COUNT(*) n,COALESCE(SUM(gross),0) gross,COALESCE(SUM(CASE WHEN status='pending' THEN net END),0) pending,COALESCE(SUM(CASE WHEN status='paid' THEN net END),0) paid,COALESCE(SUM(CASE WHEN status='held' THEN net END),0) held FROM earnings WHERE seller=?").get(u),fulfil=[];
+  for(const o of db.prepare("SELECT no,items,dday,slot,dstatus FROM orders WHERE (status IS NULL OR status!='awaiting_payment') AND (dstatus IS NULL OR dstatus NOT IN ('delivered','cancelled')) ORDER BY dday IS NULL,dday,slot,id").all()){
+    const its=JSON.parse(o.items).filter(i=>i.o===u);
+    if(its.length)fulfil.push({no:o.no,dday:o.dday,slot:o.slot,dstatus:o.dstatus||"placed",items:its.map(i=>({t:i.t,q:i.q,p:i.p}))});
+  }
+  res.json({totals:{ads:mine.length,live:mine.filter(a=>!a.x&&!a.hidden).length,views:mine.reduce((n,a)=>n+(a.views||0),0),sales:tot.n,gross:tot.gross,pending:tot.pending,paid:tot.paid,held:tot.held},ads:mine.map(a=>({id:a.id,t:a.t,views:a.views||0,live:!a.x&&!a.hidden,sales:eb[a.id]?eb[a.id].n:0,gross:eb[a.id]?eb[a.id].gross:0})),fulfil});
+});
 app.use("/uploads",express.static(UP,{maxAge:"7d"}));
-app.get(["/","/index.html"],(req,res)=>res.type("html").send(fs.readFileSync(path.join(__dirname,"public","index.html"),"utf8").replaceAll("%SITE%",SITE(req))));
 app.use(express.static(path.join(__dirname,"public")));
 app.use("/api",(req,res)=>res.status(404).json({error:"Not found."}));
 app.use((err,req,res,next)=>res.status(err.status||500).json({error:err.type=="entity.too.large"?"Photos are too large. Use fewer or smaller photos.":"Something went wrong. Please try again."}));
