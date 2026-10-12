@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Window Shopping</title>
+<style>
+:root{box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);
+--brand:#1559d6;--brand2:#0d43a8;--bg:#eef3fb;--card:#fff;--text:#14213d;--muted:#64748b;--line:#dbe4f3;--accent:#e8f0fe;--price:#0d43a8}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0b1220;--card:#131c2e;--text:#e6ecf8;--muted:#93a1ba;--line:#243350;--accent:#1b2a47;--price:#7fb0ff}}
+:root[data-theme="dark"]{--bg:#0b1220;--card:#131c2e;--text:#e6ecf8;--muted:#93a1ba;--line:#243350;--accent:#1b2a47;--price:#7fb0ff}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;line-height:1.4}
+button,input,select,textarea{font:inherit;color:inherit}
+header{background:var(--brand);color:#fff;position:sticky;top:env(safe-area-inset-top,0px);z-index:20}
+.bar{max-width:1100px;margin:auto;display:flex;align-items:center;gap:16px;padding:10px 16px}
+.logo{font-weight:800;font-size:22px;letter-spacing:-.5px}
+.tag{flex:1;text-align:center;opacity:.75;font-size:14px;text-transform:uppercase}
+.bar a,.bar .lnk{color:#fff;font-size:13px;cursor:pointer;background:none;border:0}
+.sell{background:#fff;color:var(--brand2);border:0;border-radius:8px;padding:10px 32px;font-weight:700;cursor:pointer}
+.hero{background:var(--brand);color:#fff;text-align:center;padding:40px 16px 56px;border-radius:0 0 28px 28px}
+.hero h1{font-size:22px;margin:0 0 20px}
+.search{display:flex;gap:8px;max-width:600px;margin:auto}
+.search select,.search input{height:48px;border:0;border-radius:8px;background:#fff;color:#14213d;padding:0 14px}
+.search select{width:140px}.search input{flex:1;min-width:0}
+main{max-width:1100px;margin:16px auto;padding:0 16px;display:grid;grid-template-columns:260px 1fr;gap:16px}
+.cats{background:var(--card);border-radius:8px;overflow:hidden;align-self:start}
+.cat{display:flex;align-items:center;gap:12px;width:100%;padding:10px 12px;border:0;border-bottom:1px solid var(--line);background:none;text-align:left;cursor:pointer}
+.cat:hover,.cat.on{background:var(--accent)}
+.cat .ic{width:34px;height:34px;border-radius:8px;background:var(--accent);display:grid;place-items:center;font-size:18px;flex:none}
+.cat b{display:block;font-size:14px;font-weight:600}.cat small{color:var(--muted);font-size:12px}
+.cat .ch{margin-left:auto;color:var(--muted)}
+.chips{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px}
+.chip{border:1px solid var(--brand);background:var(--accent);border-radius:8px;padding:10px 14px;font-weight:600;font-size:14px;cursor:pointer}
+.chip:hover{background:var(--brand);color:#fff}
+.head{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+.head h2{font-size:16px;margin:0;font-weight:500}
+.tog{border:1px solid var(--line);background:var(--card);border-radius:8px;width:36px;height:36px;cursor:pointer}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:14px}
+.grid.list{grid-template-columns:1fr}
+.ad{background:var(--card);border-radius:8px;overflow:hidden;border:1px solid var(--line);cursor:pointer;display:flex;flex-direction:column}
+.ad.feat{border-color:var(--brand);border-width:2px}
+.grid.list .ad{flex-direction:row}
+.pic{aspect-ratio:3/4;display:grid;place-items:center;font-size:64px;position:relative;background-size:cover;background-position:center;flex:none}
+.grid.list .pic{aspect-ratio:1;width:150px}
+.badge{position:absolute;top:8px;left:8px;background:#fff;color:var(--brand2);border-radius:12px;padding:2px 8px;font-size:11px;font-weight:600}
+.info{padding:10px 12px}
+.price{color:var(--price);font-weight:700}
+.t{font-size:14px;margin:4px 0}.m{color:var(--muted);font-size:12px}
+.empty{padding:40px;text-align:center;color:var(--muted);grid-column:1/-1}
+.modal{position:fixed;inset:0;background:rgba(10,20,40,.55);display:none;align-items:center;justify-content:center;padding:16px;z-index:50}
+.modal.open{display:flex}
+.box{background:var(--card);border-radius:12px;max-width:520px;width:100%;max-height:90vh;overflow:auto;padding:20px}
+.box h3{margin:0 0 12px}
+label{display:block;font-size:13px;font-weight:600;margin:12px 0 4px}
+.box input,.box select,.box textarea{width:100%;border:1px solid var(--line);background:var(--bg);border-radius:8px;padding:10px}
+.drop{border:2px dashed var(--brand);border-radius:10px;padding:18px;text-align:center;cursor:pointer;background:var(--accent)}
+.thumbs{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+.thumbs img{width:64px;height:64px;object-fit:cover;border-radius:8px}
+.row{display:flex;gap:8px;margin-top:16px}
+.btn{flex:1;border:0;border-radius:8px;padding:12px;font-weight:700;cursor:pointer;background:var(--brand);color:#fff}
+.btn.alt{background:var(--accent);color:var(--text)}
+.dv{width:100%;aspect-ratio:4/3;border-radius:10px;display:grid;place-items:center;font-size:90px;background-size:cover;background-position:center;margin-bottom:10px}
+.toast{position:fixed;bottom:calc(20px + env(safe-area-inset-bottom,0px));left:50%;transform:translateX(-50%);background:var(--brand2);color:#fff;padding:10px 18px;border-radius:20px;display:none;z-index:60}
+@media(max-width:800px){
+main{grid-template-columns:1fr}
+.cats{display:flex;overflow-x:auto}
+.cat{width:auto;flex:none;border-bottom:0;border-right:1px solid var(--line)}
+.cat small,.cat .ch{display:none}
+.tag{display:none}.bar{justify-content:space-between}
+.sell{padding:10px 18px}
+.search select{width:110px}
+}
+</style>
+</head>
+<body>
+<header><div class="bar">
+<div class="logo">🛍️ Window Shopping</div>
+<div class="tag">Browse faster, buy smarter</div>
+<button class="lnk" onclick="toast('Sign in is a demo')">Sign in</button>
+<button class="lnk" onclick="toast('Registration is a demo')">Registration</button>
+<button class="sell" onclick="openSell()">SELL</button>
+</div></header>
+
+<section class="hero">
+<h1>What are you looking for?</h1>
+<div class="search">
+<select id="loc" aria-label="Location"></select>
+<input id="q" type="search" placeholder="I am looking for..." aria-label="Search">
+</div>
+</section>
+
+<main>
+<nav class="cats" id="cats" aria-label="Categories"></nav>
+<section>
+<div class="chips">
+<button class="chip" onclick="toast('Niche Intelligence coming soon')">🔍 Niche Intelligence</button>
+<button class="chip" onclick="toast('Job applications coming soon')">💼 Apply for job</button>
+<button class="chip" onclick="toast('Tap SELL to post an ad')">💰 How to sell</button>
+<button class="chip" onclick="toast('Search, then contact the seller')">🧺 How to buy</button>
+</div>
+<div class="head"><h2 id="ttl">Trending ads</h2><button class="tog" id="tog" title="Toggle view">☰</button></div>
+<div class="grid" id="grid"></div>
+</section>
+</main>
+
+<div class="modal" id="sellM"><div class="box">
+<h3>Post an ad</h3>
+<label>Photos</label>
+<div class="drop" onclick="file.click()">Tap to upload images</div>
+<input type="file" id="file" accept="image/*" multiple hidden>
+<div class="thumbs" id="thumbs"></div>
+<label>Title</label><input id="fT" placeholder="e.g. Toyota Corolla 2012">
+<label>Category</label><select id="fC"></select>
+<label>Location</label><select id="fL"></select>
+<label>Condition</label>
+<select id="fK"><option>Brand new</option><option>Used</option><option>Refurbished</option></select>
+<label>Price (GH₵)</label><input id="fP" type="number" min="0" placeholder="0">
+<label>Description</label><textarea id="fD" rows="3"></textarea>
+<div class="row"><button class="btn alt" onclick="closeM('sellM')">Cancel</button><button class="btn" onclick="post()">Publish</button></div>
+</div></div>
+
+<div class="modal" id="viewM"><div class="box" id="viewB"></div></div>
+<div class="toast" id="toast"></div>
+
+<script>
+var CATS=[["Vehicles","🚗",138412],["Property","🏠",28806],["Phones & Tablets","📱",47123],["Electronics","💻",215038],["Home, Furniture & Appliances","🛋️",321924],["Fashion","👗",53381],["Beauty & Personal Care","💄",20112]];
+var LOCS=["All Ghana","Greater Accra","Ashanti","Western","Central","Eastern","Volta","Northern"];
+var ads=[
+{t:"Toyota Highlander 2008",c:0,l:"Ashanti",p:55000,k:"Used",f:1,e:"🚙",b:"Verified ID"},
+{t:"Honda Civic 2009, clean",c:0,l:"Greater Accra",p:38000,k:"Used",f:0,e:"🚗",b:"4.6 rating"},
+{t:"Toyota Matrix, foreign used",c:0,l:"Greater Accra",p:42000,k:"Used",f:0,e:"🚘",b:""},
+{t:"Honda Civic Sport 2018",c:0,l:"Ashanti",p:120000,k:"Used",f:1,e:"🏎️",b:"Popular"},
+{t:"3 bedroom house to let",c:1,l:"Greater Accra",p:2800,k:"Used",f:0,e:"🏡",b:""},
+{t:"iPhone 13 128GB",c:2,l:"Greater Accra",p:5200,k:"Used",f:1,e:"📱",b:"Verified ID"},
+{t:"Samsung Galaxy Tab A8",c:2,l:"Central",p:1900,k:"Brand new",f:0,e:"📲",b:""},
+{t:"HP Laptop 15, 8GB RAM",c:3,l:"Ashanti",p:3400,k:"Refurbished",f:0,e:"💻",b:""},
+{t:"55 inch Smart TV",c:3,l:"Greater Accra",p:3900,k:"Brand new",f:1,e:"📺",b:"Popular"},
+{t:"Sofa set, 5 seater",c:4,l:"Western",p:2500,k:"Brand new",f:0,e:"🛋️",b:""},
+{t:"Ankara dress, size M",c:5,l:"Volta",p:180,k:"Brand new",f:0,e:"👗",b:""},
+{t:"Shea butter gift set",c:6,l:"Northern",p:95,k:"Brand new",f:0,e:"🧴",b:""}
+];
+var st={cat:-1,list:false},imgs=[];
+var $=function(i){return document.getElementById(i)};
+function fill(sel,arr,skip){sel.innerHTML=arr.slice(skip||0).map(function(x){return"<option>"+x+"</option>"}).join("")}
+fill($("loc"),LOCS);fill($("fL"),LOCS,1);
+$("fC").innerHTML=CATS.map(function(c,i){return'<option value="'+i+'">'+c[0]+"</option>"}).join("");
+function esc(s){return String(s).replace(/[&<>"]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]})}
+function money(n){return"GH₵ "+Number(n).toLocaleString()}
+function drawCats(){
+$("cats").innerHTML=CATS.map(function(c,i){
+var n=c[2]+ads.filter(function(a){return a.c==i&&a.u}).length;
+return'<button class="cat'+(st.cat==i?" on":"")+'" onclick="pick('+i+')"><span class="ic">'+c[1]+'</span><span><b>'+esc(c[0])+"</b><small>"+n.toLocaleString()+' ads</small></span><span class="ch">›</span></button>'}).join("")}
+function pick(i){st.cat=st.cat==i?-1:i;draw()}
+function pic(a){return a.img?'style="background-image:url('+a.img+')"':'style="background:linear-gradient(135deg,#dbe8ff,#9ec1ff)"'}
+function draw(){
+drawCats();
+var q=$("q").value.toLowerCase(),l=$("loc").value;
+var r=ads.map(function(a,i){a.i=i;return a}).filter(function(a){
+return(st.cat<0||a.c==st.cat)&&(l=="All Ghana"||a.l==l)&&(!q||a.t.toLowerCase().indexOf(q)>-1)});
+$("ttl").textContent=st.cat<0?"Trending ads":CATS[st.cat][0];
+var g=$("grid");g.className="grid"+(st.list?" list":"");
+g.innerHTML=r.length?r.map(function(a){
+return'<div class="ad'+(a.f?" feat":"")+'" onclick="show('+a.i+')"><div class="pic" '+pic(a)+">"+(a.img?"":a.e)+(a.b?'<span class="badge">'+esc(a.b)+"</span>":"")+'</div><div class="info"><div class="price">'+money(a.p)+'</div><div class="t">'+esc(a.t)+'</div><div class="m">'+esc(a.l)+" · "+esc(a.k)+"</div></div></div>"}).join(""):'<div class="empty">No ads match. Try another search or location.</div>'}
+function show(i){var a=ads[i];
+$("viewB").innerHTML='<div class="dv" '+pic(a)+">"+(a.img?"":a.e)+'</div><div class="price" style="font-size:20px">'+money(a.p)+"</div><h3>"+esc(a.t)+'</h3><div class="m">'+esc(CATS[a.c][0])+" · "+esc(a.l)+" · "+esc(a.k)+"</div><p>"+esc(a.d||"No description provided.")+'</p><div class="row"><button class="btn alt" onclick="closeM(\'viewM\')">Close</button><button class="btn" onclick="toast(\'Seller contact is a demo\');">Contact seller</button></div>';
+$("viewM").classList.add("open")}
+function openSell(){imgs=[];$("thumbs").innerHTML="";$("sellM").classList.add("open")}
+function closeM(id){$(id).classList.remove("open")}
+document.querySelectorAll(".modal").forEach(function(m){m.addEventListener("click",function(e){if(e.target==m)m.classList.remove("open")})});
+$("file").addEventListener("change",function(e){
+Array.prototype.slice.call(e.target.files).forEach(function(f){
+var r=new FileReader();r.onload=function(){imgs.push(r.result);$("thumbs").insertAdjacentHTML("beforeend",'<img alt="" src="'+r.result+'">')};r.readAsDataURL(f)});e.target.value=""});
+function post(){
+var t=$("fT").value.trim(),p=$("fP").value;
+if(!t||p===""){toast("Add a title and a price");return}
+ads.unshift({t:t,c:+$("fC").value,l:$("fL").value,p:+p,k:$("fK").value,d:$("fD").value,img:imgs[0],e:"🛍️",f:0,b:"New",u:1});
+["fT","fP","fD"].forEach(function(i){$(i).value=""});
+closeM("sellM");st.cat=-1;$("q").value="";draw();toast("Your ad is live")}
+function toast(m){var t=$("toast");t.textContent=m;t.style.display="block";clearTimeout(toast.h);toast.h=setTimeout(function(){t.style.display="none"},2200)}
+$("q").addEventListener("input",draw);$("loc").addEventListener("change",draw);
+$("tog").addEventListener("click",function(){st.list=!st.list;draw()});
+draw();
+</script>
+</body>
+</html>

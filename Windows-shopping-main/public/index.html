@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="DealMart: great deals every day. Buy and sell new and used items across Ghana.">
+<meta name="theme-color" content="#374151">
+<meta property="og:type" content="website">
+<meta property="og:title" content="DealMart – Great deals. Every day.">
+<meta property="og:description" content="Buy and sell across Ghana.">
+<meta property="og:image" content="%SITE%/og-image.png">
+<meta name="twitter:card" content="summary_large_image">
+<title>DealMart – Great deals. Every day.</title>
+<link rel="icon" href="favicon.ico" sizes="any">
+<link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header><div class="bar">
+<a class="logo" href="./"><img src="logo-icon.png" alt="" width="38" height="38"><span>DealMart</span></a>
+<div class="tag">Great deals. Every day.</div>
+<button class="lnk" id="acct">Sign in</button>
+<button class="lnk" id="msgB" title="Messages" aria-label="Messages">💬 <span id="mc">0</span></button>
+<button class="lnk" id="wishB" title="Saved items">♡ <span id="wc">0</span></button>
+<button class="lnk" id="cartB" title="Cart">🛒 <span id="cc">0</span></button>
+<button class="sell" id="sellB">SELL</button>
+</div></header>
+
+<section class="hero">
+<h1>What are you looking for?</h1>
+<div class="search">
+<select id="loc" aria-label="Location"></select>
+<input id="q" type="search" placeholder="I am looking for..." aria-label="Search">
+</div>
+</section>
+
+<main>
+<nav class="cats" id="cats" aria-label="Categories"></nav>
+<section>
+<div class="chips">
+<button class="chip" id="hb">🧺 How to buy</button>
+<button class="chip" id="hs">💰 How to sell</button>
+<button class="chip" id="ht">🛡️ Safety tips</button>
+</div>
+<div class="filters">
+<select id="so" aria-label="Sort"><option value="new">Newest</option><option value="low">Price: low to high</option><option value="high">Price: high to low</option></select>
+<select id="fk" aria-label="Condition"><option>Any condition</option><option>Brand new</option><option>Used</option><option>Refurbished</option></select>
+<input id="mn" type="number" min="0" placeholder="Min GH₵" aria-label="Minimum price">
+<input id="mx" type="number" min="0" placeholder="Max GH₵" aria-label="Maximum price">
+<button class="chip" id="xf">⚙️ More filters <span id="xc"></span></button>
+<button class="tog" id="tog" title="Toggle grid or list">☰</button>
+</div>
+<div class="head"><h2 id="ttl">Trending ads</h2><span class="m" id="cnt"></span></div>
+<div class="grid" id="grid"></div>
+<div style="text-align:center;margin:16px"><button class="btn alt" id="more" style="max-width:220px">Load more</button></div>
+</section>
+</main>
+
+<footer>DealMart © 2026, buy and sell across Ghana</footer>
+
+<div class="co" id="co"></div>
+<div class="modal" id="m" role="dialog" aria-modal="true"><div class="box"><button class="x" onclick="X()" aria-label="Close">×</button><div id="mb"></div></div></div>
+<div class="toast" id="toast"></div>
+<script src="script.js"></script>
+</body>
+</html>
