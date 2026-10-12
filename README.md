@@ -1,0 +1,121 @@
+# DealMart
+
+A buy-and-sell website for Ghana with a real backend. Accounts, ads, photos, messages, orders and payouts are saved on the server, so every visitor sees the same listings. It can be installed on a phone like an app.
+
+## Run it on your computer
+1. Install Node.js 20 or newer (nodejs.org).
+2. In this folder run:
+   ```
+   npm install
+   npm start
+   ```
+3. Open http://localhost:3000
+
+Run `npm install` again after every update, because new features add packages (the latest is `web-push` for phone alerts).
+
+Data lives in the `data/` folder: `shop.db` (the database), `uploads/` (photos), `backups/` (daily copies) and `vapid.json` (the keys for phone alerts). **Back this folder up. Deleting it resets the site.**
+
+## What the site does
+
+### Buying
+- Browse by category, location, condition and price. Each category has its own filters (for example mileage and year for cars, bedrooms for property).
+- **Search** suggests ads and categories as you type, remembers your last 6 searches, and matches every word you type (so "toyota 2008" finds it). **📍 Near me** uses your phone's location to pick the closest region. It only chooses a region, it does not store your location.
+- Saved items (wish list) and the cart are kept in your browser.
+- Each ad has its own link, like `yoursite.com/ad/13`. Shared on WhatsApp, the link shows that ad's photo, title and price. The 🔗 Share button uses the phone's share sheet.
+- Message a seller, or make an offer. The seller accepts or declines, and an accepted offer sets the price for that buyer's order.
+- Reviews can only be written by people who bought the item through the site, and can include photos. Other buyers can mark a review as helpful. Sellers show an average rating and a ✔ Verified badge once they verify their phone.
+- Report any suspicious ad with "Report this ad".
+
+### Checkout and orders
+- Minimum order and cash-on-delivery limit are set in `config.json` (`minOrder`, `codMax`). They count items only, not delivery.
+- The buyer picks a delivery region, day and time window, and can save up to 10 addresses, with an optional GhanaPost digital address.
+- Delivery fee: set in `config.json` under `delivery`. It can be per product or per order, by price tier, with an optional extra fee per region.
+- Pay by card or Mobile Money through Paystack, or cash on delivery.
+- **My orders** shows a tracker (placed, confirmed, out for delivery, delivered). The buyer can change the address, day or time until the order is out for delivery.
+- **Cancel order and refund policy**: a buyer can cancel only while the order has **not been sent out for delivery** and at least **24 hours before the delivery window starts** (change the hours with `cancelHoursBefore`). After that the Cancel button disappears and the buyer is told the window has closed. Cash orders are simply cancelled. If the buyer already paid online, a refund is queued for the admin. A cancelled order loses its review rights.
+- **Report a problem**: allowed for 48 hours after delivery (item not received, not as described, damaged, wrong item, other). This is separate from cancelling: the admin reviews each report and decides on a refund case by case. The seller's earnings for that order are put on hold until then.
+
+### Selling
+- Tap SELL, add details, up to 5 photos and a price. Sellers can edit, mark sold, or delete ads.
+- **Promote an ad** for 3, 7 or 14 days (plans and prices in `config.json`). The seller pays by Mobile Money, enters the transaction ID, and the admin approves it. Promoted ads show first with a ⭐ badge.
+- **Seller dashboard** (account, then 📊 Dashboard): live ads, ad views, delivered sales, money waiting for payout, money on hold, orders to fulfil, and views and sales for each ad.
+- **Earnings and payouts**: when an order is delivered, the seller earns the item price minus the commission (`commissionPercent`). Delivery fees belong to DealMart. Sellers add their Mobile Money details in their account, and the admin pays them out and records the transaction ID.
+
+### Alerts
+- **Email** (and SMS, see below) for order confirmations, new orders, new messages, new and answered offers, delivery updates, cancellations, reported problems and refunds. Message emails are limited to one per conversation every 10 minutes.
+- **Phone alerts**: users tap "Turn on phone alerts" in their account to get the same alerts as push notifications. On iPhone, install the app to the home screen first.
+- **Install as an app**: account, then "Install app". The site includes a web app manifest and a service worker (`sw.js`).
+
+### Accounts and security
+- Register with name, email, phone and password (8+ characters), and accept the Terms and Privacy Policy.
+- Phone verification by a 6-digit code. Forgot password and change password by email code.
+- Passwords are hashed. Sign-in, codes and messages are rate limited. Secure cookies and an HTTPS redirect are used in production. Security headers and a content-security policy are set on every page.
+
+### Admin (sign in with the `adminEmail` account)
+- 🛡️ **Admin queue**: approve or reject promotions, and review reported ads (hide, restore or dismiss). An ad is hidden automatically after 5 open reports.
+- 🚚 **Deliveries**: move orders forward (confirm, out for delivery, delivered), with each customer's address, time slot and whether to collect cash. Delivering an order creates the seller's earnings.
+- 💰 **Payouts**: see what is owed to sellers, record payouts, and see your commission and delivery fees. ⬇️ **Download backup** gives a `.tar.gz` of the database, photos and phone-alert keys.
+- ⚖️ **Disputes**: review reported problems and approve a refund or reject. Approving cancels the seller's earnings for that order. If the seller was already paid, the app warns you so you can recover the money. The same screen lists **refunds to send**: online payments can be refunded with one tap through Paystack, and cash orders are refunded by Mobile Money with the transaction ID recorded.
+
+### Pages
+- `/terms`, `/privacy`, `/contact` and `/faq`. The `%COMPANY%`, `%MIN_ORDER%`, `%COD_MAX%`, `%COMMISSION%` and `%CANCEL_HOURS%` values are filled in from `config.json`.
+- The contact form checks the fields and opens the visitor's email app. A floating WhatsApp button appears when `supportWhatsapp` is set.
+- Demo listings appear until you set `"showSamples": false`. Put photos in `public/samples/` as `1.jpg`, `1-2.jpg`, `1-3.jpg`, `2.jpg` and so on to give them pictures.
+
+## Settings
+
+Everything lives in `config.json`. Put private values (passwords, keys) in `config.local.json` instead, which is ignored by git and overrides `config.json`. If a file has a typo, the server tells you at start-up and ignores it.
+
+| Setting | What it does |
+|---|---|
+| `adminEmail` | The account that gets the admin buttons |
+| `company`, `supportEmail`, `supportWhatsapp`, `supportHours` | Name and contact details shown on the site and legal pages |
+| `siteUrl` | Your real web address. Used in alerts and share previews. **Change it when you go live.** |
+| `payNumber`, `payName` | Mobile Money number sellers pay promotions to |
+| `paystackSecret` | Paystack secret key (turns on card and Mobile Money) |
+| `minOrder`, `codMax` | Minimum order, and the largest order allowed as cash on delivery |
+| `cancelHoursBefore` | How many hours before the delivery window starts a buyer can still cancel (default 24). Never possible once the order is out for delivery. |
+| `commissionPercent` | Percentage DealMart keeps from each item price (0 to 50) |
+| `showSamples` | Show or hide the demo ads |
+| `delivery`, `deliverySlots`, `deliveryDays`, `noDeliveryWeekdays` | Delivery fees, time windows, how many days ahead can be booked, and days with no delivery (0 is Sunday) |
+| `promoPlans` | Promotion lengths and prices |
+| `smtp`, `mailFrom` | Email sending (see below) |
+| `dataDir`, `rateLimit` | Optional: where data is kept, and sign-in attempts allowed per 15 minutes |
+
+These environment variables override the matching setting: `PORT`, `DATA_DIR`, `ADMIN_EMAIL`, `PAY_NUMBER`, `SUPPORT_EMAIL`, `SUPPORT_WHATSAPP`, `SITE_URL`, `PAYSTACK_SECRET_KEY`, `SMTP_URL`, `MAIL_FROM`, `RATE_LIMIT`. Also `NODE_ENV=production` (secure cookies and HTTPS redirect) and `SMS_LIVE` (see SMS).
+
+### Email
+Put real SMTP details in `config.local.json`:
+```
+{ "smtp": { "host": "smtp.yourprovider.com", "port": 587, "secure": false, "auth": { "user": "...", "pass": "..." } }, "mailFrom": "DealMart <no-reply@yourdomain.com>" }
+```
+Until then, emails (including password reset codes) are printed in the server window instead of being sent.
+
+### SMS
+SMS messages (verification codes and the important alerts) are currently **printed in the server window only**. To send real SMS, connect a provider (for example Hubtel or Arkesel) in the `sms()` function in `server.js`.
+
+### Paystack
+1. Add your secret key as `paystackSecret` (in `config.local.json`) or `PAYSTACK_SECRET_KEY`.
+2. In the Paystack dashboard, set the webhook URL to `https://yoursite.com/api/paystack/webhook`.
+3. Card and Mobile Money switch on automatically. Without a key, only cash on delivery works.
+
+### Phone alerts and installing the app
+- Keys are created automatically the first time the server starts and saved in `data/vapid.json`. Keep that file with your backups, or phones will need to turn alerts on again.
+- Phone alerts and installing need **HTTPS** (localhost is fine for testing).
+- `public/icon-192.png` (192×192) and `public/icon-512.png` (512×512) are the DealMart app icons phones use when installing, and the picture shown on phone alerts. `manifest.webmanifest` and `sw.js` point to them by these exact names. To change the icon, replace both files with square PNGs of the same sizes.
+
+## Going live
+- Use a host with a persistent disk (a small VPS, or Railway or Render with a disk) and keep `data/` on it.
+- Serve over HTTPS and start with `NODE_ENV=production`. Set `PORT` if your host needs one.
+- Set `siteUrl`, `adminEmail`, your SMTP and Paystack details, and the Paystack webhook.
+- Set `"showSamples": false` to hide the demo ads.
+- A backup of the database is saved every day in `data/backups/` (the last 14 are kept). To restore a downloaded backup, unpack it into `data/` while the server is stopped.
+
+## Layout
+- `server.js` - the API (accounts, ads, orders, payments, messages, alerts, refunds, admin) and file hosting
+- `config.json` - settings. `config.local.json` - private overrides (not in git)
+- `public/index.html`, `style.css`, `script.js` - the website
+- `public/terms.html`, `privacy.html`, `contact.html`, `faq.html`, `pages.js` - the information pages
+- `public/sw.js`, `manifest.webmanifest`, `icon-192.png`, `icon-512.png` - installable app and phone alerts
+- `public/samples/` - optional photos for the demo ads
+- `data/` - created automatically (database, photos, backups, alert keys)
